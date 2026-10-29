@@ -7,8 +7,8 @@ namespace BulletHeaven.Rendering;
 /// Optional imported models. Put a .glb in assets/models/ with one of the names below and it
 /// replaces the placeholder primitives; delete it and the primitives come back.
 ///
-/// Models are auto-fitted: scaled so their longest horizontal side matches <see cref="ModelSpec.Length"/>,
-/// placed with their lowest point on the ground, and turned by <see cref="ModelSpec.YawDegrees"/>.
+/// Models are auto-fitted: scaled so their longest horizontal side (or their height, for characters)
+/// matches <see cref="ModelSpec.Size"/>, placed with their lowest point on the ground, and turned by <see cref="ModelSpec.YawDegrees"/>.
 /// The game expects models to face +X; glTF models usually face +Z, hence the default 90°.
 /// If a model drives sideways or backwards, change its YawDegrees here (try 0, 180 or -90).
 /// </summary>
@@ -16,10 +16,11 @@ public static class ModelLibrary
 {
     public const string Folder = "res://assets/models/";
 
-    public static readonly ModelSpec Car = new("car", Length: 1.4f, YawDegrees: 90f);
-    public static readonly ModelSpec Ant = new("ant", Length: 1f, YawDegrees: 90f);
-    public static readonly ModelSpec Beetle = new("beetle", Length: 1f, YawDegrees: 90f);
-    public static readonly ModelSpec Gem = new("gem", Length: 1f, YawDegrees: 0f);
+    public static readonly ModelSpec Runner = new("runner", Size: 1.2f, YawDegrees: 90f, FitHeight: true);
+    public static readonly ModelSpec Car = new("car", Size: 1.4f, YawDegrees: 90f);
+    public static readonly ModelSpec Ant = new("ant", Size: 1f, YawDegrees: 90f);
+    public static readonly ModelSpec Beetle = new("beetle", Size: 1f, YawDegrees: 90f);
+    public static readonly ModelSpec Gem = new("gem", Size: 1f, YawDegrees: 0f);
 
     /// <summary>Instantiates the model as a fitted node tree, or returns null if the file isn't there.</summary>
     public static Node3D LoadScene(ModelSpec spec)
@@ -73,8 +74,8 @@ public static class ModelLibrary
 
     private static Transform3D Fit(ModelSpec spec, Aabb box)
     {
-        float longest = MathF.Max(box.Size.X, box.Size.Z);
-        float scale = longest > 1e-4f ? spec.Length / longest : 1f;
+        float measured = spec.FitHeight ? box.Size.Y : MathF.Max(box.Size.X, box.Size.Z);
+        float scale = measured > 1e-4f ? spec.Size / measured : 1f;
         var basis = new Basis(Vector3.Up, Mathf.DegToRad(spec.YawDegrees)) * Basis.FromScale(Vector3.One * scale);
 
         // Centre horizontally and stand it on the ground before turning.
@@ -113,7 +114,7 @@ public static class ModelLibrary
     }
 }
 
-public readonly record struct ModelSpec(string Name, float Length, float YawDegrees)
+public readonly record struct ModelSpec(string Name, float Size, float YawDegrees, bool FitHeight = false)
 {
     public string Path => ModelLibrary.Folder + Name + ".glb";
 }

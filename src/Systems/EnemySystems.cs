@@ -70,23 +70,25 @@ public sealed class EnemySpawnSystem(World world, GameState state) : GameSystem(
         var (radius, enemy, health) = kind switch
         {
             EnemyKind.Beetle => (0.75f,
-                new Enemy { Kind = kind, Speed = 2.6f + jitter * 0.4f, ContactDamage = 14f, XpValue = 4 },
+                new Enemy { Kind = kind, Speed = 2.6f + jitter * 0.4f, ClimbSpeed = 1.5f, ContactDamage = 14f, XpValue = 4 },
                 new Health(45f + t * 0.4f)),
             _ => (0.35f,
-                new Enemy { Kind = kind, Speed = 4.2f + jitter * 0.8f, ContactDamage = 6f, XpValue = 1 },
+                new Enemy { Kind = kind, Speed = 4.2f + jitter * 0.8f, ClimbSpeed = 3f, ContactDamage = 6f, XpValue = 1 },
                 new Health(10f + t * 0.12f)),
         };
 
-        World.Create(new Position(position), new Velocity(), new Radius(radius), enemy, health);
+        var elevation = new Elevation { Height = State.Terrain.GroundHeight(position), Grounded = true };
+        World.Create(new Position(position), new Velocity(), new Radius(radius), elevation, enemy, health);
     }
 }
 
-/// <summary>Chases the player, keeping distance from neighbours so swarms spread out.</summary>
+/// <summary>Chases the player, keeping distance from neighbours so swarms spread out. Bugs head
+/// straight for the player; walls in the way get climbed (see CollisionSystem).</summary>
 public sealed class EnemySteeringSystem(World world, GameState state) : GameSystem(world, state)
 {
     // In a dense crowd a handful of neighbours is enough to keep bugs apart, and keeps the cost flat.
     private const int MaxNeighbours = 8;
-    private static readonly QueryDescription Query = new QueryDescription().WithAll<Enemy, Position, Velocity, Radius>();
+    private static readonly QueryDescription Query = new QueryDescription().WithAll<Enemy, Position, Velocity, Radius, Elevation>();
     private readonly List<int> _neighbours = new();
 
     public override void Update(float dt)
@@ -96,7 +98,8 @@ public sealed class EnemySteeringSystem(World world, GameState state) : GameSyst
         var grid = State.EnemyGrid; // built last frame; only its arrays are read here
         float knockbackDecay = MathF.Exp(-6f * dt);
 
-        World.Query(in Query, (Entity entity, ref Enemy enemy, ref Position position, ref Velocity velocity, ref Radius radius) =>
+        World.Query(in Query, (Entity entity, ref Enemy enemy, ref Position position, ref Velocity velocity, ref Radius radius,
+            ref Elevation elevation) =>
         {
             var toPlayer = playerPos - position.Value;
             float distance = toPlayer.Length();
@@ -109,8 +112,8 @@ public sealed class EnemySteeringSystem(World world, GameState state) : GameSyst
             grid.Query(position.Value, radius.Value, _neighbours, MaxNeighbours);
             foreach (int i in _neighbours)
             {
-                if (grid.Entities[i] == entity)
-                    continue;
+                if (grid.Entities[i] == entity || MathF.Abs(grid.Heights[i] - elevation.Height) > 1f)
+                    continue; // bugs on another level don't crowd each other
                 var away = position.Value - grid.Positions[i];
                 float minDist = radius.Value + grid.Radii[i];
                 float distSq = away.LengthSquared();
@@ -136,14 +139,14 @@ public sealed class EnemySteeringSystem(World world, GameState state) : GameSyst
 /// <summary>Rebuilds the enemy spatial grid from current positions.</summary>
 public sealed class EnemyGridSystem(World world, GameState state) : GameSystem(world, state)
 {
-    private static readonly QueryDescription Query = new QueryDescription().WithAll<Enemy, Position, Radius>();
+    private static readonly QueryDescription Query = new QueryDescription().WithAll<Enemy, Position, Radius, Elevation>();
 
     public override void Update(float dt)
     {
         var grid = State.EnemyGrid;
         grid.Clear();
-        World.Query(in Query, (Entity entity, ref Position position, ref Radius radius) =>
-            grid.Add(entity, position.Value, radius.Value));
+        World.Query(in Query, (Entity entity, ref Position position, ref Radius radius, ref Elevation elevation) =>
+            grid.Add(entity, position.Value, radius.Value, elevation.Height));
         grid.Build();
     }
 }

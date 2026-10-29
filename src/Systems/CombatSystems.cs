@@ -7,15 +7,18 @@ using Godot;
 namespace BulletHeaven.Systems;
 
 /// <summary>
-/// Car vs. enemy contact. Hitting an enemy fast enough rams it (damage scales with closing speed);
-/// anything slower and the enemy bites the car instead. Bugs only touch the car when it's at
-/// their height, so jumping clears a swarm, and landing hard on one squashes everything nearby.
+/// Player vs. bug contact. Bugs only touch the player at their own height.
+/// Runner: coming down onto a bug stomps it and bounces you up (chain them!); touching one on the
+/// ground gets you bitten. Car: hitting a bug fast enough rams it, slower and it bites.
+/// Either way a long fall ends in a shockwave that flattens everything around the landing spot.
 /// </summary>
-public sealed class RamSystem(World world, GameState state) : GameSystem(world, state)
+public sealed class PlayerContactSystem(World world, GameState state) : GameSystem(world, state)
 {
     private const float RamSpeed = 6f;
-    private const float ContactHeight = 0.7f;
-    private const float StompImpact = 7f; // ramp jumps and drops, not a plain hop
+    private const float ContactHeight = 0.5f;
+    private const float StompReach = 0.7f; // how far above a bug's base counts as landing on it
+    private const float ShockwaveImpact = 11f; // roughly a drop from 3 units up
+
     private readonly List<int> _hits = new();
 
     public override void Update(float dt)
@@ -23,21 +26,20 @@ public sealed class RamSystem(World world, GameState state) : GameSystem(world, 
         var player = State.Player;
         ref var health = ref World.Get<Health>(player);
         ref var velocity = ref World.Get<Velocity>(player);
-        var elevation = World.Get<Elevation>(player);
+        ref var elevation = ref World.Get<Elevation>(player);
         var position = World.Get<Position>(player).Value;
         float radius = World.Get<Radius>(player).Value;
+        bool isCar = World.Has<Car>(player);
         var grid = State.EnemyGrid;
-        var terrain = State.Terrain;
 
         health.Invulnerable = MathF.Max(0f, health.Invulnerable - dt);
-        if (elevation.Height < -0.5f)
-            return; // falling off the table
 
-        if (elevation.LandingImpact > StompImpact)
-            Stomp(position, elevation.LandingImpact);
+        if (elevation.LandingImpact > ShockwaveImpact)
+            Shockwave(position, elevation.Height, elevation.LandingImpact);
 
         _hits.Clear();
         grid.Query(position, radius, _hits);
+        bool bounce = false;
 
         foreach (int i in _hits)
         {
@@ -45,14 +47,27 @@ public sealed class RamSystem(World world, GameState state) : GameSystem(world, 
             ref var enemyHealth = ref World.Get<Health>(target);
             if (enemyHealth.Current <= 0f)
                 continue;
-            if (MathF.Abs(elevation.Height - terrain.GroundHeight(grid.Positions[i])) > ContactHeight)
-                continue; // flying over it, or it's down below a book we're parked on
 
             ref var enemy = ref World.Get<Enemy>(target);
-            var direction = (grid.Positions[i] - position).Normalized();
-            float closing = velocity.Value.Dot(direction);
+            var away = grid.Positions[i] - position;
+            var direction = away.LengthSquared() > 1e-6f ? away.Normalized() : Vector2.Right;
+            float above = elevation.Height - grid.Heights[i];
 
-            if (closing > RamSpeed)
+            bool descending = (!elevation.Grounded && elevation.VerticalSpeed <= 0f) || elevation.LandingImpact > 0f;
+            if (!isCar && descending && above >= -0.1f && above <= StompReach)
+            {
+                enemyHealth.Current -= State.StompDamage;
+                enemy.HitFlash = 0.15f;
+                enemy.Knockback = direction * 6f;
+                bounce = true;
+                continue;
+            }
+
+            if (MathF.Abs(above) > ContactHeight)
+                continue; // on another level, or passing overhead
+
+            float closing = velocity.Value.Dot(direction);
+            if (isCar && closing > RamSpeed)
             {
                 enemyHealth.Current -= closing * State.RamDamagePerSpeed;
                 enemy.Knockback = direction * (6f + closing * 0.8f);
@@ -67,36 +82,48 @@ public sealed class RamSystem(World world, GameState state) : GameSystem(world, 
             }
         }
 
+        if (bounce)
+        {
+            float bounceSpeed = World.Has<RunnerStats>(player) ? World.Get<RunnerStats>(player).StompBounce : 7f;
+            elevation.VerticalSpeed = bounceSpeed;
+            elevation.Grounded = false;
+        }
+
         if (health.Current <= 0f && !State.GameOver)
         {
             State.GameOver = true;
-            State.ShowMessage("WRECKED!\nPress R / Start to restart", float.MaxValue);
+            State.ShowMessage("SQUASHED!\nPress R / Start to restart", float.MaxValue);
         }
     }
 
-    /// <summary>Ground-pound: damage and fling every bug around the landing spot.</summary>
-    private void Stomp(Vector2 position, float impact)
+    /// <summary>Hard landing: damage and fling every bug around the landing spot on the same level.</summary>
+    private void Shockwave(Vector2 position, float height, float impact)
     {
         var grid = State.EnemyGrid;
-        float stompRadius = 1.2f + impact * 0.12f;
+        float reach = 1.2f + impact * 0.15f;
         _hits.Clear();
-        grid.Query(position, stompRadius, _hits);
+        grid.Query(position, reach, _hits);
         foreach (int i in _hits)
         {
+            if (MathF.Abs(grid.Heights[i] - height) > 1f)
+                continue;
             var target = grid.Entities[i];
             var away = grid.Positions[i] - position;
             var direction = away.LengthSquared() > 1e-6f ? away.Normalized() : Vector2.Right;
-            World.Get<Health>(target).Current -= impact * 5f;
+            World.Get<Health>(target).Current -= impact * 3f;
             ref var enemy = ref World.Get<Enemy>(target);
             enemy.Knockback = direction * (8f + impact);
             enemy.HitFlash = 0.15f;
         }
+        State.ShowMessage("STOMP!", 0.6f);
     }
 }
 
-/// <summary>Fires the car's auto-aim gun at the nearest enemy in range.</summary>
+/// <summary>Fires the player's auto-aim gun at the nearest bug in range on roughly the same level.</summary>
 public sealed class WeaponSystem(World world, GameState state) : GameSystem(world, state)
 {
+    public const float MaxHeightDifference = 2f;
+
     private static readonly QueryDescription Query = new QueryDescription().WithAll<PlayerTag, Position, Velocity, Elevation, Weapon>();
     private readonly List<int> _scratch = new();
     private readonly List<(Vector2 Position, Vector2 Velocity, Bullet Bullet)> _shots = new();
@@ -106,13 +133,13 @@ public sealed class WeaponSystem(World world, GameState state) : GameSystem(worl
         _shots.Clear();
         var grid = State.EnemyGrid;
 
-        World.Query(in Query, (ref Position position, ref Velocity carVelocity, ref Elevation elevation, ref Weapon weapon) =>
+        World.Query(in Query, (ref Position position, ref Velocity playerVelocity, ref Elevation elevation, ref Weapon weapon) =>
         {
             weapon.Timer -= dt;
             if (weapon.Timer > 0f)
                 return;
 
-            int target = grid.Nearest(position.Value, weapon.Range, _scratch);
+            int target = grid.Nearest(position.Value, weapon.Range, _scratch, elevation.Height, MaxHeightDifference);
             if (target < 0)
                 return; // hold fire until something is in range
 
@@ -121,7 +148,7 @@ public sealed class WeaponSystem(World world, GameState state) : GameSystem(worl
             for (int k = 0; k < weapon.Projectiles; k++)
             {
                 float angle = aim + (k - (weapon.Projectiles - 1) * 0.5f) * weapon.Spread;
-                var velocity = Vector2.FromAngle(angle) * weapon.BulletSpeed + carVelocity.Value * 0.5f;
+                var velocity = Vector2.FromAngle(angle) * weapon.BulletSpeed + playerVelocity.Value * 0.5f;
                 _shots.Add((position.Value, velocity, new Bullet
                 {
                     Damage = weapon.Damage,
@@ -138,7 +165,7 @@ public sealed class WeaponSystem(World world, GameState state) : GameSystem(worl
     }
 }
 
-/// <summary>Moves bullets' lifetimes along and applies hits against the enemy grid.</summary>
+/// <summary>Ages bullets and applies hits against bugs at about the bullet's height.</summary>
 public sealed class BulletSystem(World world, GameState state) : GameSystem(world, state)
 {
     private static readonly QueryDescription Query = new QueryDescription().WithAll<Bullet, Position, Velocity, Radius>();
@@ -162,7 +189,7 @@ public sealed class BulletSystem(World world, GameState state) : GameSystem(worl
             foreach (int i in _hits)
             {
                 var target = grid.Entities[i];
-                if (target == bullet.LastHit)
+                if (target == bullet.LastHit || MathF.Abs(grid.Heights[i] + 0.5f - bullet.Height) > WeaponSystem.MaxHeightDifference)
                     continue;
                 ref var health = ref World.Get<Health>(target);
                 if (health.Current <= 0f)

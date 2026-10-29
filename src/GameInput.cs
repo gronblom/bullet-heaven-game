@@ -10,8 +10,11 @@ public static class GameInput
     public const string Brake = "brake";
     public const string SteerLeft = "steer_left";
     public const string SteerRight = "steer_right";
+    public const string MoveUp = "move_up";
+    public const string MoveDown = "move_down";
     public const string Handbrake = "handbrake";
     public const string Jump = "jump";
+    public const string RunnerJump = "runner_jump"; // A is free when not driving
     public const string Restart = "restart";
 
     public static void Register()
@@ -20,8 +23,11 @@ public static class GameInput
         Add(Brake, Key(Godot.Key.S), Key(Godot.Key.Down), Button(JoyButton.X), Axis(JoyAxis.TriggerLeft, 1f));
         Add(SteerLeft, Key(Godot.Key.A), Key(Godot.Key.Left), Axis(JoyAxis.LeftX, -1f));
         Add(SteerRight, Key(Godot.Key.D), Key(Godot.Key.Right), Axis(JoyAxis.LeftX, 1f));
+        Add(MoveUp, Key(Godot.Key.W), Key(Godot.Key.Up), Axis(JoyAxis.LeftY, -1f));
+        Add(MoveDown, Key(Godot.Key.S), Key(Godot.Key.Down), Axis(JoyAxis.LeftY, 1f));
         Add(Handbrake, Key(Godot.Key.Shift), Key(Godot.Key.Ctrl), Button(JoyButton.B), Button(JoyButton.RightShoulder));
         Add(Jump, Key(Godot.Key.Space), Button(JoyButton.Y));
+        Add(RunnerJump, Key(Godot.Key.Space), Button(JoyButton.A), Button(JoyButton.Y));
         Add(Restart, Key(Godot.Key.R), Key(Godot.Key.Enter), Button(JoyButton.Start));
     }
 

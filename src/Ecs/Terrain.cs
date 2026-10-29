@@ -8,82 +8,154 @@ namespace BulletHeaven.Ecs;
 /// <summary>
 /// Static level geometry gathered from Obstacle and Ramp entities once after the level is built.
 /// Answers "how high is the ground here?" and pushes movers out of anything too tall to step onto.
+/// Props are bucketed into a coarse grid so each query only looks at the few props nearby.
 /// </summary>
 public sealed class Terrain
 {
-    /// <summary>Ground height beyond the table edge: effectively a bottomless drop.</summary>
+    /// <summary>Ground height outside the level bounds: effectively a bottomless drop.</summary>
     public const float OffTable = -1000f;
+    private const float CellSize = 8f;
+
+    private struct Solid
+    {
+        public Vector2 Center;
+        public bool IsRamp;
+        public Obstacle Obstacle;
+        public Ramp Ramp;
+    }
 
     private readonly Rect2 _bounds;
-    private readonly (Vector2 Position, Obstacle Obstacle)[] _obstacles;
-    private readonly (Vector2 Position, Ramp Ramp)[] _ramps;
+    private readonly Solid[] _solids;
+    private readonly int[][] _cells;
+    private readonly int _cols, _rows;
+    private readonly int[] _visited; // per-solid stamp so a query handles each solid once
+    private int _stamp;
 
-    private Terrain(Rect2 bounds, (Vector2, Obstacle)[] obstacles, (Vector2, Ramp)[] ramps)
+    private Terrain(Rect2 bounds, Solid[] solids)
     {
         _bounds = bounds;
-        _obstacles = obstacles;
-        _ramps = ramps;
+        _solids = solids;
+        _visited = new int[solids.Length];
+        _cols = Math.Max(1, (int)MathF.Ceiling(bounds.Size.X / CellSize));
+        _rows = Math.Max(1, (int)MathF.Ceiling(bounds.Size.Y / CellSize));
+
+        var lists = new List<int>[_cols * _rows];
+        for (int c = 0; c < lists.Length; c++)
+            lists[c] = new List<int>();
+        for (int i = 0; i < solids.Length; i++)
+        {
+            var half = solids[i].IsRamp ? solids[i].Ramp.HalfExtents
+                : solids[i].Obstacle.Shape == ObstacleShape.Circle ? new Vector2(solids[i].Obstacle.Radius, solids[i].Obstacle.Radius)
+                : solids[i].Obstacle.HalfExtents;
+            ForCells(solids[i].Center - half, solids[i].Center + half, c => lists[c].Add(i));
+        }
+        _cells = Array.ConvertAll(lists, l => l.ToArray());
     }
 
     public static Terrain FromWorld(World world, Rect2 bounds)
     {
-        var obstacles = new List<(Vector2, Obstacle)>();
-        var ramps = new List<(Vector2, Ramp)>();
+        var solids = new List<Solid>();
         world.Query(new QueryDescription().WithAll<Position, Obstacle>(),
-            (ref Position position, ref Obstacle obstacle) => obstacles.Add((position.Value, obstacle)));
+            (ref Position position, ref Obstacle obstacle) => solids.Add(new Solid { Center = position.Value, Obstacle = obstacle }));
         world.Query(new QueryDescription().WithAll<Position, Ramp>(),
-            (ref Position position, ref Ramp ramp) => ramps.Add((position.Value, ramp)));
-        return new Terrain(bounds, obstacles.ToArray(), ramps.ToArray());
+            (ref Position position, ref Ramp ramp) => solids.Add(new Solid { Center = position.Value, IsRamp = true, Ramp = ramp }));
+        return new Terrain(bounds, solids.ToArray());
     }
 
-    public bool OnTable(Vector2 point) => _bounds.HasPoint(point);
+    public bool InBounds(Vector2 point) => _bounds.HasPoint(point);
 
-    /// <summary>Highest surface under a point: table (0), prop tops and ramps.</summary>
+    /// <summary>Highest surface under a point: the floor (0), prop tops and ramps.</summary>
     public float GroundHeight(Vector2 point)
     {
         if (!_bounds.HasPoint(point))
             return OffTable;
 
         float height = 0f;
-        foreach (var (center, obstacle) in _obstacles)
+        foreach (int i in _cells[CellIndex(point)])
         {
-            if (obstacle.Height > height && Contains(point, center, obstacle))
-                height = obstacle.Height;
-        }
-        foreach (var (center, ramp) in _ramps)
-        {
-            var local = point - center;
-            if (MathF.Abs(local.X) <= ramp.HalfExtents.X && MathF.Abs(local.Y) <= ramp.HalfExtents.Y)
-                height = MathF.Max(height, ramp.HeightAt(local));
+            ref var solid = ref _solids[i];
+            var local = point - solid.Center;
+            if (solid.IsRamp)
+            {
+                if (MathF.Abs(local.X) <= solid.Ramp.HalfExtents.X && MathF.Abs(local.Y) <= solid.Ramp.HalfExtents.Y)
+                    height = MathF.Max(height, solid.Ramp.HeightAt(local));
+            }
+            else if (solid.Obstacle.Height > height && Contains(point, solid.Center, solid.Obstacle))
+            {
+                height = solid.Obstacle.Height;
+            }
         }
         return height;
     }
 
+    public Vector2 ResolveWalls(ref Vector2 point, float radius, float height, float stepUp) =>
+        ResolveWalls(ref point, radius, height, stepUp, out _);
+
     /// <summary>
     /// Pushes a circle at <paramref name="height"/> out of every solid whose surface is more than
-    /// <paramref name="stepUp"/> above it. Returns the summed push-out normals (zero if nothing was hit).
+    /// <paramref name="stepUp"/> above it. Returns the summed push-out normals (zero if nothing was
+    /// hit) and the top of the highest wall that was hit.
     /// </summary>
-    public Vector2 ResolveWalls(ref Vector2 point, float radius, float height, float stepUp)
+    public Vector2 ResolveWalls(ref Vector2 point, float radius, float height, float stepUp, out float wallTop)
     {
         var normals = Vector2.Zero;
         float limit = height + stepUp;
+        wallTop = 0f;
+        _stamp++;
 
-        foreach (var (center, obstacle) in _obstacles)
+        var reach = new Vector2(radius, radius);
+        int x0 = CellX(point.X - reach.X), x1 = CellX(point.X + reach.X);
+        int y0 = CellY(point.Y - reach.Y), y1 = CellY(point.Y + reach.Y);
+        for (int cy = y0; cy <= y1; cy++)
         {
-            if (obstacle.Height > limit && Resolve(ref point, radius, center, obstacle.Shape, obstacle.Radius, obstacle.HalfExtents, out var n))
-                normals += n;
-        }
+            for (int cx = x0; cx <= x1; cx++)
+            {
+                foreach (int i in _cells[cy * _cols + cx])
+                {
+                    if (_visited[i] == _stamp)
+                        continue;
+                    _visited[i] = _stamp;
+                    ref var solid = ref _solids[i];
 
-        foreach (var (center, ramp) in _ramps)
-        {
-            // A ramp is a wall where its nearest edge is too high (its back and upper sides).
-            var nearest = (point - center).Clamp(-ramp.HalfExtents, ramp.HalfExtents);
-            if (ramp.HeightAt(nearest) > limit && Resolve(ref point, radius, center, ObstacleShape.Box, 0f, ramp.HalfExtents, out var n))
-                normals += n;
+                    float top;
+                    bool hit;
+                    Vector2 n = default;
+                    if (solid.IsRamp)
+                    {
+                        // A ramp is a wall where its nearest edge is too high (its back and upper sides).
+                        var nearest = (point - solid.Center).Clamp(-solid.Ramp.HalfExtents, solid.Ramp.HalfExtents);
+                        top = solid.Ramp.HeightAt(nearest);
+                        hit = top > limit && Resolve(ref point, radius, solid.Center, ObstacleShape.Box, 0f, solid.Ramp.HalfExtents, out n);
+                    }
+                    else
+                    {
+                        top = solid.Obstacle.Height;
+                        hit = top > limit && Resolve(ref point, radius, solid.Center, solid.Obstacle.Shape, solid.Obstacle.Radius,
+                            solid.Obstacle.HalfExtents, out n);
+                    }
+
+                    if (hit)
+                    {
+                        normals += n;
+                        wallTop = MathF.Max(wallTop, top);
+                    }
+                }
+            }
         }
 
         return normals;
     }
+
+    private void ForCells(Vector2 min, Vector2 max, Action<int> action)
+    {
+        for (int cy = CellY(min.Y); cy <= CellY(max.Y); cy++)
+            for (int cx = CellX(min.X); cx <= CellX(max.X); cx++)
+                action(cy * _cols + cx);
+    }
+
+    private int CellIndex(Vector2 p) => CellY(p.Y) * _cols + CellX(p.X);
+    private int CellX(float x) => Math.Clamp((int)((x - _bounds.Position.X) / CellSize), 0, _cols - 1);
+    private int CellY(float y) => Math.Clamp((int)((y - _bounds.Position.Y) / CellSize), 0, _rows - 1);
 
     private static bool Contains(Vector2 point, Vector2 center, in Obstacle obstacle)
     {

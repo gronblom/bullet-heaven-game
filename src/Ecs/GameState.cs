@@ -25,6 +25,7 @@ public sealed class GameState
     // Player-wide modifiers changed by upgrades.
     public float MagnetRadius = 4f;
     public float RamDamagePerSpeed = 2.5f;
+    public float StompDamage = 30f;
 
     public string Message = "";
     public float MessageTimer;

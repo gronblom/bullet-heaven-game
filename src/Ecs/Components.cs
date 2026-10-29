@@ -43,7 +43,7 @@ public struct Health
 
 public struct PlayerTag;
 
-/// <summary>Live driving state of a car. Heading is the angle of the car's nose on the ground plane.</summary>
+/// <summary>Live driving state of a car (optional player vehicle). Heading is the angle of the car's nose on the ground plane.</summary>
 public struct Car
 {
     public float Heading;
@@ -56,9 +56,38 @@ public struct Car
     public float ForwardSpeed;
     public float Slip; // lateral speed, i.e. how hard the car is drifting
     public float JumpCooldown;
+}
 
-    // Where to respawn after falling off the table.
-    public Vector2 LastSafePosition;
+/// <summary>Direct-control character: push a direction and it runs that way.</summary>
+public struct Runner
+{
+    public Vector2 Move;   // input, length <= 1, in ground-plane axes
+    public bool JumpPressed;
+    public bool JumpHeld;
+    public float Facing;   // angle the character looks towards (visual + nothing else)
+
+    public float JumpBuffer; // remembers a jump press for a moment before landing
+    public bool Jumped;      // since last grounded; blocks coyote-time double jumps
+}
+
+public struct RunnerStats
+{
+    public float MaxSpeed;
+    public float Acceleration;
+    public float AirAcceleration;
+    public float Friction;
+    public float JumpSpeed;
+    public float StompBounce;
+
+    public static RunnerStats Default => new()
+    {
+        MaxSpeed = 7.5f,
+        Acceleration = 70f,
+        AirAcceleration = 30f,
+        Friction = 60f,
+        JumpSpeed = 9.5f, // ~2 units high: enough to hop up one toy block or book
+        StompBounce = 7f,
+    };
 }
 
 /// <summary>Height above the table top and vertical motion. Entities without it stay on the ground.</summary>
@@ -67,6 +96,7 @@ public struct Elevation
     public float Height;
     public float VerticalSpeed;
     public bool Grounded;
+    public bool Climbing; // scaling a wall (bugs); gravity is suspended
     public float AirTime;
     /// <summary>Downward speed at the moment of landing; non-zero only on the landing frame.</summary>
     public float LandingImpact;
@@ -109,6 +139,7 @@ public struct Enemy
 {
     public EnemyKind Kind;
     public float Speed;
+    public float ClimbSpeed;
     public float ContactDamage;
     public int XpValue;
     public Vector2 Knockback;

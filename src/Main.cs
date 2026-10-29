@@ -11,15 +11,18 @@ namespace BulletHeaven;
 /// <summary>
 /// Entry point. Godot owns the window, input and rendering; all gameplay state lives in the Arch
 /// ECS world and is advanced by the systems below. Each frame: run systems, then copy ECS state
-/// into the visuals (car node, MultiMesh batches, camera, HUD).
+/// into the visuals (player node, MultiMesh batches, camera, HUD).
 /// </summary>
 public partial class Main : Node3D
 {
-    private static readonly Vector3 CameraOffset = new(0f, 34f, 22f);
+    /// <summary>Tick in the Inspector (select the Main node) to play as the toy car instead of the runner.</summary>
+    [Export] public bool DriveCar { get; set; }
+
+    private static readonly Vector3 CameraOffset = new(0f, 32f, 18f);
     private static readonly Color AntColor = new(0.45f, 0.08f, 0.05f);
     private static readonly Color BeetleColor = new(0.1f, 0.3f, 0.25f);
 
-    private static readonly QueryDescription EnemyQuery = new QueryDescription().WithAll<Enemy, Position, Velocity, Radius>();
+    private static readonly QueryDescription EnemyQuery = new QueryDescription().WithAll<Enemy, Position, Velocity, Radius, Elevation>();
     private static readonly QueryDescription BulletQuery = new QueryDescription().WithAll<Bullet, Position>();
     private static readonly QueryDescription GemQuery = new QueryDescription().WithAll<XpGem, Position>();
 
@@ -28,6 +31,8 @@ public partial class Main : Node3D
     private GameSystem[] _systems;
 
     private CarView _carView;
+    private RunnerView _runnerView;
+    private OcclusionFader _fader;
     private Camera3D _camera;
     private Vector3 _cameraTarget;
     private Hud _hud;
@@ -41,27 +46,38 @@ public partial class Main : Node3D
         GameInput.Register();
 
         _world = World.Create();
-        _state = new GameState(KitchenTable.Bounds);
+        _state = new GameState(Kitchen.Bounds);
+        _fader = new OcclusionFader();
 
         BuildEnvironment();
-        KitchenTable.Build(this, _world);
-        _state.Terrain = Terrain.FromWorld(_world, KitchenTable.Bounds);
+        Kitchen.Build(this, _world, _fader);
+        _state.Terrain = Terrain.FromWorld(_world, Kitchen.Bounds);
 
-        var start = new Vector2(0f, 8f);
-        const float startHeading = -Mathf.Pi / 2f; // nose pointing up the screen
+        var start = Kitchen.PlayerStart;
+        const float facingUp = -Mathf.Pi / 2f; // up the screen
         _state.Player = _world.Create(
             new PlayerTag(),
             new Position(start),
             new Velocity(),
-            new Radius(0.6f),
             new Health(100f),
-            new Car { Heading = startHeading, LastSafePosition = start },
             new Elevation { Grounded = true },
-            CarStats.Default,
             Weapon.Default);
 
-        _carView = new CarView(new Color(0.9f, 0.15f, 0.1f));
-        AddChild(_carView);
+        if (DriveCar)
+        {
+            _world.Add(_state.Player, new Radius(0.6f), new Car { Heading = facingUp }, CarStats.Default);
+            _carView = new CarView(new Color(0.9f, 0.15f, 0.1f));
+            AddChild(_carView);
+        }
+        else
+        {
+            var weapon = Weapon.Default;
+            weapon.Cooldown = 0.35f; // no ramming on foot, so a slightly quicker gun
+            _world.Set(_state.Player, weapon);
+            _world.Add(_state.Player, new Radius(0.35f), new Runner { Facing = facingUp }, RunnerStats.Default);
+            _runnerView = new RunnerView();
+            AddChild(_runnerView);
+        }
 
         // One batch per enemy kind so each can use its own imported model.
         _antRenderer = new InstancedRenderer(this, new SphereMesh { Radius = 1f, Height = 2f, RadialSegments = 10, Rings = 6 },
@@ -80,13 +96,14 @@ public partial class Main : Node3D
         _systems = new GameSystem[]
         {
             new PlayerInputSystem(_world, _state),
+            new RunnerPhysicsSystem(_world, _state),
             new CarPhysicsSystem(_world, _state),
             new EnemySteeringSystem(_world, _state),
             new MovementSystem(_world, _state),
             new CollisionSystem(_world, _state),
             new VerticalPhysicsSystem(_world, _state),
             new EnemyGridSystem(_world, _state),
-            new RamSystem(_world, _state),
+            new PlayerContactSystem(_world, _state),
             new WeaponSystem(_world, _state),
             new BulletSystem(_world, _state),
             new EnemyDeathSystem(_world, _state),
@@ -95,7 +112,9 @@ public partial class Main : Node3D
         };
 
         _cameraTarget = new Vector3(start.X, 0f, start.Y);
-        _state.ShowMessage("Ram the bugs!\nWASD / arrows to drive, Shift to drift, Space to jump", 4f);
+        _state.ShowMessage(DriveCar
+            ? "Ram the bugs!\nWASD / arrows to drive, Shift to drift, Space to jump"
+            : "Stomp the bugs!\nWASD / arrows / stick to run, Space / A to jump\nClimb the stools or the toy blocks to reach the counter", 5f);
     }
 
     public override void _Process(double delta)
@@ -133,31 +152,37 @@ public partial class Main : Node3D
         var player = _state.Player;
         var position = _world.Get<Position>(player);
         var velocity = _world.Get<Velocity>(player);
-        var car = _world.Get<Car>(player);
         var elevation = _world.Get<Elevation>(player);
         var health = _world.Get<Health>(player);
-        _carView.Sync(position, car, elevation, health, dt);
-        var terrain = _state.Terrain;
+        if (DriveCar)
+            _carView.Sync(position, _world.Get<Car>(player), elevation, health, dt);
+        else
+            _runnerView.Sync(position, velocity, _world.Get<Runner>(player), elevation, health, dt);
 
-        // Camera never rotates (like Micro Machines); it trails the car with some look-ahead,
-        // rises a little with it, but doesn't follow it down off the table.
-        var lookAhead = new Vector3(velocity.Value.X, 0f, velocity.Value.Y) * 0.45f;
-        float cameraHeight = Math.Max(0f, elevation.Height) * 0.6f;
-        var desired = new Vector3(position.Value.X, cameraHeight, position.Value.Y) + lookAhead;
-        _cameraTarget = _cameraTarget.Lerp(desired, 1f - MathF.Exp(-4f * dt));
+        // Camera never rotates; it trails the player with some look-ahead and follows them up and
+        // down levels (smoothly, so a jump doesn't bounce the view).
+        var lookAhead = new Vector3(velocity.Value.X, 0f, velocity.Value.Y) * (DriveCar ? 0.45f : 0.3f);
+        var desired = new Vector3(position.Value.X, elevation.Height, position.Value.Y) + lookAhead;
+        _cameraTarget.X = Mathf.Lerp(_cameraTarget.X, desired.X, 1f - MathF.Exp(-4f * dt));
+        _cameraTarget.Z = Mathf.Lerp(_cameraTarget.Z, desired.Z, 1f - MathF.Exp(-4f * dt));
+        _cameraTarget.Y = Mathf.Lerp(_cameraTarget.Y, desired.Y, 1f - MathF.Exp(-2.5f * dt));
         _camera.Position = _cameraTarget + CameraOffset;
+
+        var playerPoint = new Vector3(position.Value.X, elevation.Height + 0.5f, position.Value.Y);
+        _fader.Update(_camera.Position, playerPoint, dt);
+        var terrain = _state.Terrain;
 
         int enemyCount = 0;
         _antRenderer.Begin();
         _beetleRenderer.Begin();
-        _world.Query(in EnemyQuery, (ref Enemy enemy, ref Position p, ref Velocity v, ref Radius r) =>
+        _world.Query(in EnemyQuery, (ref Enemy enemy, ref Position p, ref Velocity v, ref Radius r, ref Elevation e) =>
         {
             float yaw = v.Value.LengthSquared() > 0.01f ? -v.Value.Angle() : 0f;
             var renderer = enemy.Kind == EnemyKind.Beetle ? _beetleRenderer : _antRenderer;
             var color = enemy.HitFlash > 0f ? Colors.White : enemy.Kind == EnemyKind.Beetle ? BeetleColor : AntColor;
             float radius = r.Value;
             float pop = 1f + enemy.HitFlash * 2f; // hit feedback that also works for imported models
-            float ground = terrain.GroundHeight(p.Value);
+            float ground = e.Height;
 
             if (renderer.UsesModel) // models are fitted to length 1 and stand on the ground
                 renderer.Add(new Vector3(p.Value.X, ground, p.Value.Y), yaw, Vector3.One * radius * 2f * pop, color);
@@ -215,7 +240,7 @@ public partial class Main : Node3D
             LightColor = new Color(1f, 0.95f, 0.85f),
             LightEnergy = 1.2f,
             ShadowEnabled = true,
-            DirectionalShadowMaxDistance = 90f,
+            DirectionalShadowMaxDistance = 80f,
         });
 
         // Narrow field of view plus near/far depth-of-field blur = the "tilt-shift" miniature look.
@@ -226,10 +251,10 @@ public partial class Main : Node3D
             Attributes = new CameraAttributesPractical
             {
                 DofBlurNearEnabled = true,
-                DofBlurNearDistance = 28f,
+                DofBlurNearDistance = 24f,
                 DofBlurNearTransition = 10f,
                 DofBlurFarEnabled = true,
-                DofBlurFarDistance = 52f,
+                DofBlurFarDistance = 46f,
                 DofBlurFarTransition = 25f,
                 DofBlurAmount = 0.06f,
             },

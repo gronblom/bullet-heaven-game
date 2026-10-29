@@ -14,6 +14,8 @@ public sealed class PickupSystem(World world, GameState state) : GameSystem(worl
     public override void Update(float dt)
     {
         var playerPos = World.Get<Position>(State.Player).Value;
+        float playerHeight = World.Get<Elevation>(State.Player).Height;
+        var terrain = State.Terrain;
         float magnet = State.MagnetRadius;
         int collected = 0;
 
@@ -21,6 +23,8 @@ public sealed class PickupSystem(World world, GameState state) : GameSystem(worl
         {
             var toPlayer = playerPos - position.Value;
             float distance = toPlayer.Length();
+            if (!gem.Magnetized && MathF.Abs(terrain.GroundHeight(position.Value) - playerHeight) > 2.5f)
+                return; // on another level: come and get it
             if (distance < PickupRadius)
             {
                 collected += gem.Value;
@@ -60,8 +64,8 @@ public static class Upgrades
     {
         var player = state.Player;
         ref var weapon = ref world.Get<Weapon>(player);
-        ref var stats = ref world.Get<CarStats>(player);
         ref var health = ref world.Get<Health>(player);
+        bool isCar = world.Has<CarStats>(player);
 
         switch (state.Rng.Next(8))
         {
@@ -77,13 +81,21 @@ public static class Upgrades
             case 3:
                 weapon.Pierce++;
                 return "Piercing rounds";
-            case 4:
-                stats.MaxSpeed += 1.5f;
-                stats.Acceleration += 2f;
+            case 4 when isCar:
+                ref var car = ref world.Get<CarStats>(player);
+                car.MaxSpeed += 1.5f;
+                car.Acceleration += 2f;
                 return "Turbo";
-            case 5:
+            case 4:
+                world.Get<RunnerStats>(player).MaxSpeed += 0.8f;
+                return "Running shoes";
+            case 5 when isCar:
                 state.RamDamagePerSpeed *= 1.3f;
                 return "Spiked bumper";
+            case 5:
+                state.StompDamage *= 1.4f;
+                world.Get<RunnerStats>(player).StompBounce += 1f;
+                return "Heavy boots";
             case 6:
                 state.MagnetRadius += 1.5f;
                 return "Gem magnet";

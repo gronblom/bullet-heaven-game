@@ -7,7 +7,7 @@ namespace BulletHeaven.Rendering;
 /// <summary>
 /// The player's car, facing +X. Uses assets/models/car.glb if present, otherwise a toy car built
 /// from primitives. Leans into drifts, pitches with acceleration and in the air, squashes on
-/// landing and tumbles when it falls off the table.
+/// landing.
 /// </summary>
 public sealed partial class CarView : Node3D
 {
@@ -30,10 +30,7 @@ public sealed partial class CarView : Node3D
     public void Sync(in Position position, in Car car, in Elevation elevation, in Health health, float dt)
     {
         Position = new Vector3(position.Value.X, elevation.Height, position.Value.Y);
-
-        // Below the table top means we went over the edge: tumble.
-        float tumble = elevation.Height < -0.5f ? elevation.AirTime : 0f;
-        Rotation = new Vector3(tumble * 4f, -car.Heading, tumble * 2.5f);
+        Rotation = new Vector3(0f, -car.Heading, 0f);
 
         float accel = dt > 0f ? (car.ForwardSpeed - _previousSpeed) / dt : 0f;
         _previousSpeed = car.ForwardSpeed;

@@ -23,6 +23,7 @@ public sealed class SpatialGrid
     public Entity[] Entities = new Entity[256];
     public Vector2[] Positions = new Vector2[256];
     public float[] Radii = new float[256];
+    public float[] Heights = new float[256];
     public int Count { get; private set; }
 
     /// <summary>Largest item radius added since the last Clear; widens queries so big items are never missed.</summary>
@@ -43,7 +44,7 @@ public sealed class SpatialGrid
         _maxRadius = 0f;
     }
 
-    public void Add(Entity entity, Vector2 position, float radius)
+    public void Add(Entity entity, Vector2 position, float radius, float height)
     {
         if (Count == Entities.Length)
         {
@@ -51,6 +52,7 @@ public sealed class SpatialGrid
             Array.Resize(ref Entities, size);
             Array.Resize(ref Positions, size);
             Array.Resize(ref Radii, size);
+            Array.Resize(ref Heights, size);
             Array.Resize(ref _itemCell, size);
             Array.Resize(ref _sorted, size);
         }
@@ -58,6 +60,7 @@ public sealed class SpatialGrid
         Entities[Count] = entity;
         Positions[Count] = position;
         Radii[Count] = radius;
+        Heights[Count] = height;
         _maxRadius = MathF.Max(_maxRadius, radius);
         Count++;
     }
@@ -112,8 +115,9 @@ public sealed class SpatialGrid
         }
     }
 
-    /// <summary>Index of the nearest item within range, or -1.</summary>
-    public int Nearest(Vector2 center, float range, List<int> scratch)
+    /// <summary>Index of the nearest item within range and within <paramref name="maxHeightDiff"/> of
+    /// <paramref name="height"/>, or -1.</summary>
+    public int Nearest(Vector2 center, float range, List<int> scratch, float height, float maxHeightDiff)
     {
         scratch.Clear();
         Query(center, range, scratch);
@@ -121,6 +125,8 @@ public sealed class SpatialGrid
         float bestDist = float.MaxValue;
         foreach (int i in scratch)
         {
+            if (MathF.Abs(Heights[i] - height) > maxHeightDiff)
+                continue;
             float d = (Positions[i] - center).LengthSquared();
             if (d < bestDist)
             {
