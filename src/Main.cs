@@ -230,6 +230,8 @@ public partial class Main : Node3D
             AmbientLightEnergy = 0.8f,
             TonemapMode = Godot.Environment.ToneMapper.Filmic,
             SsaoEnabled = true,
+            SsilEnabled = true, // bounce light from nearby surfaces
+            SsrEnabled = true,  // reflections in the glossy counter top, tiles and mugs
             GlowEnabled = true,
         };
         AddChild(new WorldEnvironment { Environment = environment });

@@ -5,9 +5,10 @@ using Godot;
 namespace BulletHeaven.Rendering;
 
 /// <summary>
-/// The little running guy, facing +X. Uses assets/models/runner.glb if present (bobbing and
-/// leaning), otherwise a Pikmin-sized dude built from primitives with a procedural run cycle:
-/// swinging legs and arms, a jump pose and a squash on landing.
+/// The little running guy, facing +X. Uses assets/models/runner.glb if present, otherwise a
+/// Pikmin-sized dude built from primitives. Either way he gets a procedural run cycle (swinging
+/// legs and arms; a model needs child nodes named LegL, LegR, ArmL and ArmR pivoted at hip and
+/// shoulder, which the Blender generator makes), a jump pose and a squash on landing.
 /// </summary>
 public sealed partial class RunnerView : Node3D
 {
@@ -15,6 +16,7 @@ public sealed partial class RunnerView : Node3D
     private readonly Node3D[] _legs = new Node3D[2];
     private readonly Node3D[] _arms = new Node3D[2];
     private readonly bool _hasModel;
+    private readonly bool _modelLimbs;
     private float _phase;
     private float _squash;
 
@@ -27,6 +29,11 @@ public sealed partial class RunnerView : Node3D
         {
             _body.AddChild(model);
             _hasModel = true;
+            _legs[0] = ModelLibrary.FindNode(model, "LegL");
+            _legs[1] = ModelLibrary.FindNode(model, "LegR");
+            _arms[0] = ModelLibrary.FindNode(model, "ArmL");
+            _arms[1] = ModelLibrary.FindNode(model, "ArmR");
+            _modelLimbs = _legs[0] != null && _legs[1] != null && _arms[0] != null && _arms[1] != null;
         }
         else
         {
@@ -44,7 +51,17 @@ public sealed partial class RunnerView : Node3D
         _phase += dt * (6f + speed * 1.6f) * (run > 0.05f ? 1f : 0f);
         float swing = MathF.Sin(_phase) * 0.9f * run;
 
-        if (!_hasModel)
+        if (_modelLimbs)
+        {
+            // Model limbs live in the model's own frame (facing +Z), so they swing about local X.
+            float airLegs = elevation.Grounded ? 0f : -0.6f;
+            float airArms = elevation.Grounded ? 0f : -1.4f;
+            _legs[0].Rotation = new Vector3(swing + airLegs, 0f, 0f);
+            _legs[1].Rotation = new Vector3(-swing + airLegs * 0.5f, 0f, 0f);
+            _arms[0].Rotation = new Vector3(-swing * 0.8f + airArms, 0f, 0f);
+            _arms[1].Rotation = new Vector3(swing * 0.8f + airArms, 0f, 0f);
+        }
+        else if (!_hasModel)
         {
             // Legs and arms swing in opposition; tucked legs and raised arms in the air.
             float airLegs = elevation.Grounded ? 0f : 0.6f;

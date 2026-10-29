@@ -10,3 +10,6 @@ obj/
 *.user
 .vs/
 .idea/
+
+# Model previews (tools/blender/generate_models.py --preview)
+assets/previews/

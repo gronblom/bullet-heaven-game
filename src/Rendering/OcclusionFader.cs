@@ -18,13 +18,14 @@ public sealed class OcclusionFader
     {
         public Rect2 Footprint;
         public float Top;
-        public StandardMaterial3D[] Materials;
+        public BaseMaterial3D[] Materials;
         public float Alpha = 1f;
+        public bool Transparent;
     }
 
     private readonly List<Occluder> _occluders = new();
 
-    public void Register(Rect2 footprint, float top, params StandardMaterial3D[] materials) =>
+    public void Register(Rect2 footprint, float top, params BaseMaterial3D[] materials) =>
         _occluders.Add(new Occluder { Footprint = footprint, Top = top, Materials = materials });
 
     public void Update(Vector3 camera, Vector3 target, float dt)
@@ -33,11 +34,14 @@ public sealed class OcclusionFader
         foreach (var occluder in _occluders)
         {
             float goal = Blocks(occluder, camera, target) ? FadedAlpha : 1f;
+            if (goal == 1f && occluder.Alpha == 1f && !occluder.Transparent)
+                continue; // untouched this frame
             occluder.Alpha = Mathf.Lerp(occluder.Alpha, goal, blend);
             if (MathF.Abs(occluder.Alpha - goal) < 0.01f)
                 occluder.Alpha = goal;
 
             bool transparent = occluder.Alpha < 0.99f;
+            occluder.Transparent = transparent;
             foreach (var material in occluder.Materials)
             {
                 // Only switch to alpha blending while faded; opaque keeps shadows and SSAO correct.

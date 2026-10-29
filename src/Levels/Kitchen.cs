@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Arch.Core;
 using BulletHeaven.Ecs;
 using BulletHeaven.Rendering;
@@ -13,6 +14,8 @@ namespace BulletHeaven.Levels;
 ///   - east: a staircase of toy blocks, one jump per block.
 /// Anywhere is a way down. Every solid prop is a mesh plus an ECS Obstacle/Ramp entity, and
 /// anything tall registers with the occlusion fader so it turns see-through over the player.
+/// Props use the generated models in assets/models/ when present (see tools/blender), and fall
+/// back to primitives otherwise.
 /// Positions are on the ground plane (x, y) => world (x, height, y).
 /// </summary>
 public static class Kitchen
@@ -39,19 +42,36 @@ public static class Kitchen
 
         public void Room()
         {
-            // Checkered tiles.
-            var tiles = Image.CreateEmpty(2, 2, false, Image.Format.Rgb8);
-            tiles.SetPixel(0, 0, new Color(0.88f, 0.86f, 0.8f));
-            tiles.SetPixel(1, 1, new Color(0.88f, 0.86f, 0.8f));
-            tiles.SetPixel(1, 0, new Color(0.55f, 0.6f, 0.62f));
-            tiles.SetPixel(0, 1, new Color(0.55f, 0.6f, 0.62f));
-            var floor = new StandardMaterial3D
+            // Tiles: baked textures cover 2 x 2 tiles (8 units); fall back to a plain checker.
+            var tileRepeat = new Vector3(Bounds.Size.X / 8f, Bounds.Size.Y / 8f, 1f);
+            StandardMaterial3D floor;
+            if (ModelLibrary.LoadTexture("floor_albedo.png") is { } albedo)
             {
-                AlbedoTexture = ImageTexture.CreateFromImage(tiles),
-                TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
-                Uv1Scale = new Vector3(Bounds.Size.X / 8f, Bounds.Size.Y / 8f, 1f), // 4-unit tiles
-                Roughness = 0.35f,
-            };
+                floor = new StandardMaterial3D
+                {
+                    AlbedoTexture = albedo,
+                    NormalEnabled = true,
+                    NormalTexture = ModelLibrary.LoadTexture("floor_normal.png"),
+                    RoughnessTexture = ModelLibrary.LoadTexture("floor_roughness.png"),
+                    Roughness = 1f,
+                    Uv1Scale = tileRepeat,
+                };
+            }
+            else
+            {
+                var tiles = Image.CreateEmpty(2, 2, false, Image.Format.Rgb8);
+                tiles.SetPixel(0, 0, new Color(0.88f, 0.86f, 0.8f));
+                tiles.SetPixel(1, 1, new Color(0.88f, 0.86f, 0.8f));
+                tiles.SetPixel(1, 0, new Color(0.55f, 0.6f, 0.62f));
+                tiles.SetPixel(0, 1, new Color(0.55f, 0.6f, 0.62f));
+                floor = new StandardMaterial3D
+                {
+                    AlbedoTexture = ImageTexture.CreateFromImage(tiles),
+                    TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
+                    Uv1Scale = tileRepeat,
+                    Roughness = 0.35f,
+                };
+            }
             Add(new PlaneMesh { Size = Bounds.Size }, new Vector3(Bounds.GetCenter().X, 0f, Bounds.GetCenter().Y), floor);
 
             // Walls behind and to the sides; only a skirting board on the camera side.
@@ -73,13 +93,20 @@ public static class Kitchen
 
         public void KitchenCounter()
         {
+            var center = Counter.GetCenter();
+            AddObstacle(center, new Obstacle { Shape = ObstacleShape.Box, HalfExtents = Counter.Size / 2f, Height = CounterTop });
+            if (Model("counter", new Vector3(center.X, 0f, center.Y), new Vector3(Counter.Size.X + 1f, CounterTop, Counter.Size.Y + 1f)) is { } fitted)
+            {
+                fader.Register(Counter.Grow(0.5f), CounterTop, fitted);
+                return;
+            }
+
             var cabinet = Materials.Plastic(new Color(0.42f, 0.55f, 0.5f), 0.6f);
             var top = Materials.Plastic(new Color(0.2f, 0.2f, 0.22f), 0.25f);
             var doors = Materials.Plastic(new Color(0.5f, 0.64f, 0.58f), 0.55f);
             var handles = Materials.Plastic(new Color(0.8f, 0.8f, 0.82f), 0.2f);
             handles.Metallic = 0.9f;
 
-            var center = Counter.GetCenter();
             Add(new BoxMesh { Size = new Vector3(Counter.Size.X, CounterTop - 0.6f, Counter.Size.Y) },
                 new Vector3(center.X, (CounterTop - 0.6f) / 2f, center.Y), cabinet);
             Add(new BoxMesh { Size = new Vector3(Counter.Size.X + 1f, 0.6f, Counter.Size.Y + 1f) },
@@ -93,7 +120,6 @@ public static class Kitchen
                 Add(new BoxMesh { Size = new Vector3(0.4f, 1.6f, 0.4f) }, new Vector3(x + 2.8f, 6.5f, Counter.End.Y + 0.35f), handles);
             }
 
-            AddObstacle(center, new Obstacle { Shape = ObstacleShape.Box, HalfExtents = Counter.Size / 2f, Height = CounterTop });
             fader.Register(Counter.Grow(0.5f), CounterTop, cabinet, top, doors, handles);
         }
 
@@ -102,25 +128,30 @@ public static class Kitchen
             const float b = CounterTop;
             var rulerWood = new Color(0.85f, 0.7f, 0.45f);
 
-            Mug(new Vector2(-18f, -12f), b, new Color(0.92f, 0.92f, 0.9f));
-            Mug(new Vector2(19f, 3f), b, new Color(0.8f, 0.2f, 0.2f));
+            Mug(new Vector2(-18f, -12f), b, "mug_white", new Color(0.92f, 0.92f, 0.9f));
+            Mug(new Vector2(19f, 3f), b, "mug_red", new Color(0.8f, 0.2f, 0.2f));
 
             // Two-level book stack with ruler ramps; fly off the far side.
-            Block(new Vector2(6f, -10f), new Vector2(9f, 6.5f), b, 1.6f, new Color(0.2f, 0.35f, 0.7f));
-            Block(new Vector2(8f, -10f), new Vector2(5f, 4f), b + 1.6f, 1.4f, new Color(0.75f, 0.6f, 0.2f));
+            Block(new Vector2(6f, -10f), new Vector2(9f, 6.5f), b, 1.6f, new Color(0.2f, 0.35f, 0.7f), "book_blue");
+            Block(new Vector2(8f, -10f), new Vector2(5f, 4f), b + 1.6f, 1.4f, new Color(0.75f, 0.6f, 0.2f), "book_gold");
             Ramp(new Vector2(-1.5f, -10f), Vector2.Right, 6f, 3f, b, 1.6f, rulerWood);
             Ramp(new Vector2(3.5f, -10f), Vector2.Right, 4f, 3f, b + 1.6f, 1.4f, rulerWood);
 
-            Block(new Vector2(22f, -13f), new Vector2(4f, 7f), b, 14f, new Color(0.95f, 0.75f, 0.15f)); // cereal box
+            Block(new Vector2(22f, -13f), new Vector2(4f, 7f), b, 14f, new Color(0.95f, 0.75f, 0.15f), "cereal_box");
 
             // Apple.
-            var apple = Materials.Plastic(new Color(0.75f, 0.1f, 0.08f), 0.3f);
-            Add(new SphereMesh { Radius = 2.4f, Height = 4.6f }, new Vector3(-8f, b + 2.2f, 2f), apple);
+            var appleMaterials = Model("apple", new Vector3(-8f, b, 2f));
+            if (appleMaterials == null)
+            {
+                var apple = Materials.Plastic(new Color(0.75f, 0.1f, 0.08f), 0.3f);
+                Add(new SphereMesh { Radius = 2.4f, Height = 4.6f }, new Vector3(-8f, b + 2.2f, 2f), apple);
+                appleMaterials = new BaseMaterial3D[] { apple };
+            }
             AddObstacle(new Vector2(-8f, 2f), new Obstacle { Shape = ObstacleShape.Circle, Radius = 2.3f, Height = b + 4.4f });
-            fader.Register(Square(new Vector2(-8f, 2f), 2.4f), b + 4.4f, apple);
+            fader.Register(Square(new Vector2(-8f, 2f), 2.4f), b + 4.4f, appleMaterials);
 
             // Pencil with an eraser kicker in front, and a launch ramp that throws you off the counter.
-            Block(new Vector2(-14f, -3f), new Vector2(12f, 0.5f), b, 0.5f, new Color(0.95f, 0.8f, 0.1f));
+            Block(new Vector2(-14f, -3f), new Vector2(12f, 0.5f), b, 0.5f, new Color(0.95f, 0.8f, 0.1f), "pencil");
             Ramp(new Vector2(-14f, 1f), Vector2.Up, 4f, 3f, b, 1f, new Color(0.95f, 0.55f, 0.6f));
             Ramp(new Vector2(19.5f, -3f), Vector2.Right, 5f, 3f, b, 1.4f, new Color(0.3f, 0.3f, 0.35f));
 
@@ -167,9 +198,12 @@ public static class Kitchen
         public void FloorProps()
         {
             // Dog bowl with kibble around it.
-            var steel = Materials.Plastic(new Color(0.75f, 0.77f, 0.8f), 0.2f);
-            steel.Metallic = 0.8f;
-            Add(new CylinderMesh { TopRadius = 4f, BottomRadius = 3.4f, Height = 1.5f }, new Vector3(-45f, 0.75f, 30f), steel);
+            if (Model("dog_bowl", new Vector3(-45f, 0f, 30f)) == null)
+            {
+                var steel = Materials.Plastic(new Color(0.75f, 0.77f, 0.8f), 0.2f);
+                steel.Metallic = 0.8f;
+                Add(new CylinderMesh { TopRadius = 4f, BottomRadius = 3.4f, Height = 1.5f }, new Vector3(-45f, 0.75f, 30f), steel);
+            }
             AddObstacle(new Vector2(-45f, 30f), new Obstacle { Shape = ObstacleShape.Circle, Radius = 4f, Height = 1.5f });
             var kibble = Materials.Plastic(new Color(0.5f, 0.3f, 0.15f), 0.8f);
             for (int i = 0; i < 25; i++)
@@ -179,10 +213,15 @@ public static class Kitchen
             }
 
             // A big rubber ball you can climb onto.
-            var ball = Materials.Plastic(new Color(0.2f, 0.6f, 0.95f), 0.4f);
-            Add(new SphereMesh { Radius = 4f, Height = 8f }, new Vector3(55f, 4f, 32f), ball);
+            var ballMaterials = Model("ball", new Vector3(55f, 0f, 32f));
+            if (ballMaterials == null)
+            {
+                var ball = Materials.Plastic(new Color(0.2f, 0.6f, 0.95f), 0.4f);
+                Add(new SphereMesh { Radius = 4f, Height = 8f }, new Vector3(55f, 4f, 32f), ball);
+                ballMaterials = new BaseMaterial3D[] { ball };
+            }
             AddObstacle(new Vector2(55f, 32f), new Obstacle { Shape = ObstacleShape.Circle, Radius = 3.6f, Height = 8f });
-            fader.Register(Square(new Vector2(55f, 32f), 4f), 8f, ball);
+            fader.Register(Square(new Vector2(55f, 32f), 4f), 8f, ballMaterials);
 
             // A sneaker.
             Block(new Vector2(-58f, 0f), new Vector2(5f, 12f), 0f, 3.5f, new Color(0.9f, 0.9f, 0.92f));
@@ -192,21 +231,35 @@ public static class Kitchen
 
         // --- building blocks -------------------------------------------------------------
 
-        private void Mug(Vector2 at, float baseHeight, Color color)
+        private void Mug(Vector2 at, float baseHeight, string model, Color color)
         {
             const float radius = 3f, height = 6f;
+            AddObstacle(at, new Obstacle { Shape = ObstacleShape.Circle, Radius = radius, Height = baseHeight + height });
+            if (Model(model, new Vector3(at.X, baseHeight, at.Y)) is { } fitted)
+            {
+                fader.Register(Square(at, radius + 1.6f), baseHeight + height, fitted);
+                return;
+            }
+
             var mat = Materials.Plastic(color, 0.2f);
             Add(new CylinderMesh { TopRadius = radius, BottomRadius = radius * 0.92f, Height = height },
                 new Vector3(at.X, baseHeight + height / 2f, at.Y), mat);
             Add(new TorusMesh { InnerRadius = 1.1f, OuterRadius = 1.6f },
                 new Vector3(at.X + radius, baseHeight + height * 0.55f, at.Y), mat, new Vector3(90f, 0f, 0f));
-            AddObstacle(at, new Obstacle { Shape = ObstacleShape.Circle, Radius = radius, Height = baseHeight + height });
             fader.Register(Square(at, radius + 1.6f), baseHeight + height, mat);
         }
 
         private void Stool(Vector2 at)
         {
             const float seatTop = 8.5f, radius = 3f;
+            // Treated as solid so nothing walks between the legs (the height map has no overhangs).
+            AddObstacle(at, new Obstacle { Shape = ObstacleShape.Circle, Radius = radius, Height = seatTop });
+            if (Model("stool", new Vector3(at.X, 0f, at.Y)) is { } fitted)
+            {
+                fader.Register(Square(at, radius), seatTop, fitted);
+                return;
+            }
+
             var wood = Materials.Plastic(new Color(0.6f, 0.4f, 0.22f), 0.6f);
             Add(new CylinderMesh { TopRadius = radius, BottomRadius = radius, Height = 0.8f }, new Vector3(at.X, seatTop - 0.4f, at.Y), wood);
             foreach (var corner in new[] { new Vector2(1, 1), new Vector2(-1, 1), new Vector2(1, -1), new Vector2(-1, -1) })
@@ -216,8 +269,6 @@ public static class Kitchen
                     new Vector3(leg.X, (seatTop - 0.8f) / 2f, leg.Y), wood);
             }
             Add(new TorusMesh { InnerRadius = 2.1f, OuterRadius = 2.4f }, new Vector3(at.X, 3f, at.Y), wood);
-            // Treated as solid so nothing walks between the legs (the height map has no overhangs).
-            AddObstacle(at, new Obstacle { Shape = ObstacleShape.Circle, Radius = radius, Height = seatTop });
             fader.Register(Square(at, radius), seatTop, wood);
         }
 
@@ -225,25 +276,39 @@ public static class Kitchen
         {
             int count = Math.Max(1, (int)MathF.Round(top / 1.6f));
             float h = top / count;
-            var materials = new StandardMaterial3D[count];
+            var materials = new List<BaseMaterial3D>();
             for (int i = 0; i < count; i++)
             {
-                materials[i] = Materials.Plastic(palette[(index + i) % palette.Length], 0.5f);
-                Add(new BoxMesh { Size = new Vector3(size, h * 0.98f, size) }, new Vector3(at.X, h * (i + 0.5f), at.Y), materials[i]);
+                var paint = palette[(index + i) % palette.Length];
+                // Generated block: bare wood tinted with the paint colour.
+                if (Model("toy_block", new Vector3(at.X, h * i, at.Y), new Vector3(size, h * 0.98f, size), paint.Lightened(0.25f)) is { } fitted)
+                {
+                    materials.AddRange(fitted);
+                    continue;
+                }
+                var mat = Materials.Plastic(paint, 0.5f);
+                Add(new BoxMesh { Size = new Vector3(size, h * 0.98f, size) }, new Vector3(at.X, h * (i + 0.5f), at.Y), mat);
+                materials.Add(mat);
             }
             AddObstacle(at, new Obstacle { Shape = ObstacleShape.Box, HalfExtents = new Vector2(size, size) / 2f, Height = top });
-            fader.Register(Square(at, size / 2f), top, materials);
+            fader.Register(Square(at, size / 2f), top, materials.ToArray());
         }
 
-        /// <summary>Box prop. <paramref name="baseHeight"/> stands it on something below.</summary>
-        private void Block(Vector2 center, Vector2 footprint, float baseHeight, float height, Color color)
+        /// <summary>Box prop, stretched to the footprint if a <paramref name="model"/> exists.
+        /// <paramref name="baseHeight"/> stands it on something below.</summary>
+        private void Block(Vector2 center, Vector2 footprint, float baseHeight, float height, Color color, string model = null)
         {
-            var mat = Materials.Plastic(color, 0.6f);
-            Add(new BoxMesh { Size = new Vector3(footprint.X, height, footprint.Y) },
-                new Vector3(center.X, baseHeight + height / 2f, center.Y), mat);
             AddObstacle(center, new Obstacle { Shape = ObstacleShape.Box, HalfExtents = footprint / 2f, Height = baseHeight + height });
+            var size = new Vector3(footprint.X, height, footprint.Y);
+            var materials = model == null ? null : Model(model, new Vector3(center.X, baseHeight, center.Y), size);
+            if (materials == null)
+            {
+                var mat = Materials.Plastic(color, 0.6f);
+                Add(new BoxMesh { Size = size }, new Vector3(center.X, baseHeight + height / 2f, center.Y), mat);
+                materials = new BaseMaterial3D[] { mat };
+            }
             if (height > 1f)
-                fader.Register(new Rect2(center - footprint / 2f, footprint), baseHeight + height, mat);
+                fader.Register(new Rect2(center - footprint / 2f, footprint), baseHeight + height, materials);
         }
 
         private void Solid(Vector2 center, Vector2 footprint, float height, StandardMaterial3D material)
@@ -264,14 +329,12 @@ public static class Kitchen
             {
                 // Tilt a long board up towards +X, then turn it to face the direction.
                 var pivot = new Node3D { Position = at, RotationDegrees = yaw };
-                pivot.AddChild(new MeshInstance3D
-                {
-                    Mesh = new BoxMesh { Size = new Vector3(MathF.Sqrt(length * length + rise * rise), 0.4f, width) },
-                    MaterialOverride = mat,
-                    Position = new Vector3(0f, -0.2f, 0f),
-                    Rotation = new Vector3(0f, 0f, MathF.Atan2(rise, length)),
-                });
+                var tilt = new Node3D { Rotation = new Vector3(0f, 0f, MathF.Atan2(rise, length)) };
+                pivot.AddChild(tilt);
                 parent.AddChild(pivot);
+                var boardSize = new Vector3(MathF.Sqrt(length * length + rise * rise), 0.4f, width);
+                if (Model("cutting_board", new Vector3(0f, -0.4f, 0f), boardSize, into: tilt) == null)
+                    tilt.AddChild(new MeshInstance3D { Mesh = new BoxMesh { Size = boardSize }, MaterialOverride = mat, Position = new Vector3(0f, -0.2f, 0f) });
             }
             else
             {
@@ -296,6 +359,17 @@ public static class Kitchen
             new(center - new Vector2(halfSize, halfSize), new Vector2(halfSize, halfSize) * 2f);
 
         private void AddObstacle(Vector2 at, Obstacle obstacle) => world.Create(new Position(at), obstacle);
+
+        /// <summary>Places a generated model if assets/models/{name}.glb exists and returns its materials
+        /// (for fading); returns null so the caller can build its primitive fallback.</summary>
+        private BaseMaterial3D[] Model(string name, Vector3 bottomCenter, Vector3? exactSize = null, Color? tint = null, Node3D into = null)
+        {
+            if (ModelLibrary.LoadProp(name, exactSize, tint) is not { } prop)
+                return null;
+            prop.Node.Position = bottomCenter;
+            (into ?? parent).AddChild(prop.Node);
+            return prop.Materials;
+        }
 
         private void Add(Mesh mesh, Vector3 position, Material material, Vector3 rotationDegrees = default) =>
             parent.AddChild(new MeshInstance3D
