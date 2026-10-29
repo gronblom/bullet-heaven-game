@@ -1,0 +1,12 @@
+# Godot
+.godot/
+.import/
+export_presets.cfg
+/android/
+
+# .NET
+bin/
+obj/
+*.user
+.vs/
+.idea/

@@ -1,0 +1,12 @@
+<Project Sdk="Godot.NET.Sdk/4.7.2">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <RootNamespace>BulletHeaven</RootNamespace>
+    <LangVersion>12</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Arch: high-performance archetype ECS. Holds all gameplay state. -->
+    <PackageReference Include="Arch" Version="2.1.0" />
+  </ItemGroup>
+</Project>
