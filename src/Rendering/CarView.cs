@@ -1,26 +1,65 @@
 using System;
 using BulletHeaven.Ecs;
-using BulletHeaven.Systems;
 using Godot;
 
 namespace BulletHeaven.Rendering;
 
 /// <summary>
-/// Placeholder toy car built from primitives, modelled facing +X. Leans into drifts, pitches when
-/// accelerating, steers its front wheels and tumbles when it falls off the table.
-/// Replace the primitives with an imported model when one exists.
+/// The player's car, facing +X. Uses assets/models/car.glb if present, otherwise a toy car built
+/// from primitives. Leans into drifts, pitches with acceleration and in the air, squashes on
+/// landing and tumbles when it falls off the table.
 /// </summary>
 public sealed partial class CarView : Node3D
 {
     private readonly Node3D _body = new();
     private readonly Node3D[] _frontWheels = new Node3D[2];
     private float _previousSpeed;
+    private float _squash;
 
     public CarView() : this(new Color(0.85f, 0.1f, 0.1f)) { }
 
     public CarView(Color paint)
     {
         AddChild(_body);
+        if (ModelLibrary.LoadScene(ModelLibrary.Car) is { } model)
+            _body.AddChild(model);
+        else
+            BuildPlaceholder(paint);
+    }
+
+    public void Sync(in Position position, in Car car, in Elevation elevation, in Health health, float dt)
+    {
+        Position = new Vector3(position.Value.X, elevation.Height, position.Value.Y);
+
+        // Below the table top means we went over the edge: tumble.
+        float tumble = elevation.Height < -0.5f ? elevation.AirTime : 0f;
+        Rotation = new Vector3(tumble * 4f, -car.Heading, tumble * 2.5f);
+
+        float accel = dt > 0f ? (car.ForwardSpeed - _previousSpeed) / dt : 0f;
+        _previousSpeed = car.ForwardSpeed;
+        float roll = Math.Clamp(-car.Slip * 0.035f, -0.25f, 0.25f);
+        float pitch = elevation.Grounded
+            ? Math.Clamp(accel * 0.004f, -0.12f, 0.12f)
+            : Math.Clamp(elevation.VerticalSpeed * 0.04f, -0.4f, 0.4f); // nose follows the arc
+        _body.Rotation = _body.Rotation.Lerp(new Vector3(roll, 0f, pitch), Math.Min(1f, dt * 12f));
+
+        if (elevation.LandingImpact > 2f)
+            _squash = Math.Min(0.35f, elevation.LandingImpact * 0.03f);
+        _squash = Math.Max(0f, _squash - dt * 1.5f);
+        _body.Scale = new Vector3(1f + _squash * 0.5f, 1f - _squash, 1f + _squash * 0.5f);
+
+        foreach (var wheel in _frontWheels)
+        {
+            if (wheel != null)
+                wheel.Rotation = new Vector3(0f, -car.Steer * 0.45f, 0f);
+        }
+
+        // Blink while invulnerable.
+        Visible = health.Invulnerable <= 0f || (int)(health.Invulnerable * 20f) % 2 == 0;
+    }
+
+    private void BuildPlaceholder(Color paint)
+    {
         var paintMat = Materials.Plastic(paint);
         var glassMat = Materials.Plastic(new Color(0.15f, 0.2f, 0.3f), 0.1f);
         var tyreMat = Materials.Plastic(new Color(0.08f, 0.08f, 0.08f), 0.9f);
@@ -48,26 +87,6 @@ public sealed partial class CarView : Node3D
                     _frontWheels[zi] = pivot;
             }
         }
-    }
-
-    public void Sync(in Position position, in Car car, in Health health, float dt)
-    {
-        float fallTime = car.FallTimer > 0f ? CollisionSystem.FallDuration - car.FallTimer : 0f;
-        float drop = 0.5f * 30f * fallTime * fallTime;
-        Position = new Vector3(position.Value.X, -drop, position.Value.Y);
-        Rotation = new Vector3(fallTime * 4f, -car.Heading, fallTime * 2.5f);
-
-        float accel = dt > 0f ? (car.ForwardSpeed - _previousSpeed) / dt : 0f;
-        _previousSpeed = car.ForwardSpeed;
-        float roll = Math.Clamp(-car.Slip * 0.035f, -0.25f, 0.25f);
-        float pitch = Math.Clamp(accel * 0.004f, -0.12f, 0.12f);
-        _body.Rotation = _body.Rotation.Lerp(new Vector3(roll, 0f, pitch), Math.Min(1f, dt * 12f));
-
-        foreach (var wheel in _frontWheels)
-            wheel.Rotation = new Vector3(0f, -car.Steer * 0.45f, 0f);
-
-        // Blink while invulnerable.
-        Visible = health.Invulnerable <= 0f || (int)(health.Invulnerable * 20f) % 2 == 0;
     }
 
     private static MeshInstance3D Box(Vector3 size, Vector3 position, Material material) => new()

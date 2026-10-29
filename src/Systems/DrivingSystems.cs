@@ -15,12 +15,14 @@ public sealed class PlayerInputSystem(World world, GameState state) : GameSystem
         float throttle = Input.GetActionStrength(GameInput.Accelerate) - Input.GetActionStrength(GameInput.Brake);
         float steer = Input.GetAxis(GameInput.SteerLeft, GameInput.SteerRight);
         bool handbrake = Input.IsActionPressed(GameInput.Handbrake);
+        bool jump = Input.IsActionJustPressed(GameInput.Jump);
 
         World.Query(in Query, (ref Car car) =>
         {
             car.Throttle = throttle;
             car.Steer = steer;
             car.Handbrake = handbrake;
+            car.Jump = jump;
         });
     }
 }
@@ -29,18 +31,31 @@ public sealed class PlayerInputSystem(World world, GameState state) : GameSystem
 /// Arcade top-down car handling in the spirit of Micro Machines: velocity is split into a
 /// forward and a sideways part each frame. Throttle drives the forward part, grip bleeds off the
 /// sideways part. Turning rotates the nose faster than the velocity follows, so low grip
-/// (handbrake) gives long, controllable drifts.
+/// (handbrake) gives long, controllable drifts. No control while airborne.
 /// </summary>
 public sealed class CarPhysicsSystem(World world, GameState state) : GameSystem(world, state)
 {
-    private static readonly QueryDescription Query = new QueryDescription().WithAll<Car, CarStats, Velocity>();
+    private const float JumpCooldown = 0.35f;
+    private static readonly QueryDescription Query = new QueryDescription().WithAll<Car, CarStats, Velocity, Elevation>();
 
     public override void Update(float dt)
     {
-        World.Query(in Query, (ref Car car, ref CarStats stats, ref Velocity velocity) =>
+        World.Query(in Query, (ref Car car, ref CarStats stats, ref Velocity velocity, ref Elevation elevation) =>
         {
-            if (car.FallTimer > 0f)
-                return; // no control in mid-air
+            car.JumpCooldown = MathF.Max(0f, car.JumpCooldown - dt);
+
+            if (!elevation.Grounded)
+            {
+                velocity.Value *= MathF.Exp(-0.15f * dt); // a touch of air drag, otherwise ballistic
+                return;
+            }
+
+            if (car.Jump && car.JumpCooldown <= 0f)
+            {
+                elevation.VerticalSpeed = stats.JumpSpeed;
+                elevation.Grounded = false;
+                car.JumpCooldown = JumpCooldown;
+            }
 
             var forward = Vector2.FromAngle(car.Heading);
             var side = new Vector2(-forward.Y, forward.X);
@@ -98,125 +113,114 @@ public sealed class MovementSystem(World world, GameState state) : GameSystem(wo
 }
 
 /// <summary>
-/// Pushes cars and enemies out of props. The car bounces off them, and drives off the table edge
-/// (falls, then respawns at its last safe spot with a damage penalty). Enemies stay on the table.
+/// Horizontal collisions against the terrain. Whether a prop is a wall depends on height: the car
+/// can step onto anything up to <see cref="CarStepUp"/> above it, so a jump or a ramp gets it
+/// onto books it would otherwise bounce off. Bugs climb anything up to <see cref="BugClimb"/>.
 /// </summary>
 public sealed class CollisionSystem(World world, GameState state) : GameSystem(world, state)
 {
-    public const float FallDuration = 1.1f;
-    private const float FallDamage = 15f;
+    public const float CarStepUp = 0.35f;
+    public const float BugClimb = 3.5f;
     private const float Restitution = 0.45f;
 
-    private static readonly QueryDescription ObstacleQuery = new QueryDescription().WithAll<Position, Obstacle>();
-    private static readonly QueryDescription CarQuery = new QueryDescription().WithAll<Car, Position, Velocity, Radius, Health>();
+    private static readonly QueryDescription CarQuery = new QueryDescription().WithAll<Car, Position, Velocity, Radius, Elevation>();
     private static readonly QueryDescription EnemyQuery = new QueryDescription().WithAll<Enemy, Position, Radius>();
-
-    private (Vector2 Position, Obstacle Obstacle)[] _obstacles;
 
     public override void Update(float dt)
     {
-        _obstacles ??= CollectObstacles(); // props are static, gather once
+        var terrain = State.Terrain;
 
-        World.Query(in CarQuery, (ref Car car, ref Position position, ref Velocity velocity, ref Radius radius, ref Health health) =>
+        World.Query(in CarQuery, (ref Car car, ref Position position, ref Velocity velocity, ref Radius radius, ref Elevation elevation) =>
         {
-            if (car.FallTimer > 0f)
+            if (elevation.Height < -0.5f)
+                return; // already dropping past the table edge
+
+            var normals = terrain.ResolveWalls(ref position.Value, radius.Value, elevation.Height, CarStepUp);
+            if (normals != Vector2.Zero)
             {
-                car.FallTimer -= dt;
-                if (car.FallTimer <= 0f)
-                {
-                    position.Value = car.LastSafePosition;
-                    car.Heading = car.LastSafeHeading;
-                    velocity.Value = Vector2.Zero;
-                    health.Current -= FallDamage;
-                    health.Invulnerable = 1.5f;
-                    State.ShowMessage("Fell off the table!", 1.5f);
-                }
-                return;
+                var normal = normals.Normalized();
+                float into = velocity.Value.Dot(normal);
+                if (into < 0f)
+                    velocity.Value -= (1f + Restitution) * into * normal;
             }
 
-            if (!State.Bounds.HasPoint(position.Value))
-            {
-                car.FallTimer = FallDuration;
-                return;
-            }
-
-            foreach (var (obstaclePos, obstacle) in _obstacles)
-            {
-                if (Resolve(ref position.Value, radius.Value, obstaclePos, obstacle, out var normal))
-                {
-                    float into = velocity.Value.Dot(normal);
-                    if (into < 0f)
-                        velocity.Value -= (1f + Restitution) * into * normal;
-                }
-            }
-
-            // Remember a spot comfortably away from the edge to respawn at.
-            if (State.Bounds.Grow(-4f).HasPoint(position.Value))
-            {
+            // Remember a spot on the table floor, comfortably away from the edge, to respawn at.
+            if (elevation.Grounded && elevation.Height < 0.01f && State.Bounds.Grow(-4f).HasPoint(position.Value))
                 car.LastSafePosition = position.Value;
-                car.LastSafeHeading = car.Heading;
-            }
         });
 
         var inner = State.Bounds.Grow(-0.5f);
         World.Query(in EnemyQuery, (ref Position position, ref Radius radius) =>
         {
-            foreach (var (obstaclePos, obstacle) in _obstacles)
-                Resolve(ref position.Value, radius.Value, obstaclePos, obstacle, out _);
-
+            terrain.ResolveWalls(ref position.Value, radius.Value, 0f, BugClimb);
             position.Value = position.Value.Clamp(inner.Position, inner.End);
         });
     }
+}
 
-    private (Vector2, Obstacle)[] CollectObstacles()
+/// <summary>
+/// Gravity, ground following and landing. On the ground, height tracks the surface and the rate
+/// of change becomes vertical speed, so driving off the top of a ramp launches you. Past the
+/// table edge the ground drops away; the car falls and respawns with a damage penalty.
+/// </summary>
+public sealed class VerticalPhysicsSystem(World world, GameState state) : GameSystem(world, state)
+{
+    public const float Gravity = 22f;
+    private const float SnapDown = 0.25f;   // follow drops smaller than this (driving down slopes)
+    private const float RespawnHeight = -12f;
+    private const float FallDamage = 15f;
+
+    private static readonly QueryDescription Query = new QueryDescription().WithAll<Position, Elevation>();
+    private static readonly QueryDescription CarQuery = new QueryDescription().WithAll<Car, Position, Velocity, Elevation, Health>();
+
+    public override void Update(float dt)
     {
-        var list = new System.Collections.Generic.List<(Vector2, Obstacle)>();
-        World.Query(in ObstacleQuery, (ref Position position, ref Obstacle obstacle) => list.Add((position.Value, obstacle)));
-        return list.ToArray();
-    }
+        var terrain = State.Terrain;
 
-    /// <summary>Moves a circle out of an obstacle. Returns true with the push-out normal if they overlapped.</summary>
-    private static bool Resolve(ref Vector2 point, float radius, Vector2 center, in Obstacle obstacle, out Vector2 normal)
-    {
-        normal = Vector2.Zero;
-        if (obstacle.Shape == ObstacleShape.Circle)
+        World.Query(in Query, (ref Position position, ref Elevation elevation) =>
         {
-            var diff = point - center;
-            float minDist = radius + obstacle.Radius;
-            float distSq = diff.LengthSquared();
-            if (distSq >= minDist * minDist)
-                return false;
+            float ground = terrain.GroundHeight(position.Value);
+            elevation.LandingImpact = 0f;
 
-            float dist = MathF.Sqrt(distSq);
-            normal = dist > 1e-4f ? diff / dist : Vector2.Right;
-            point = center + normal * minDist;
-            return true;
-        }
+            if (elevation.Grounded)
+            {
+                if (ground < elevation.Height - SnapDown)
+                {
+                    elevation.Grounded = false; // drove off an edge; keep the current vertical speed
+                }
+                else
+                {
+                    elevation.VerticalSpeed = Math.Clamp((ground - elevation.Height) / dt, -12f, 12f);
+                    elevation.Height = ground;
+                    return;
+                }
+            }
 
-        var min = center - obstacle.HalfExtents;
-        var max = center + obstacle.HalfExtents;
-        var closest = point.Clamp(min, max);
-        var delta = point - closest;
-        float dSq = delta.LengthSquared();
+            elevation.AirTime += dt;
+            elevation.VerticalSpeed -= Gravity * dt;
+            elevation.Height += elevation.VerticalSpeed * dt;
+            if (elevation.Height <= ground)
+            {
+                elevation.LandingImpact = -elevation.VerticalSpeed;
+                elevation.Height = ground;
+                elevation.VerticalSpeed = 0f;
+                elevation.Grounded = true;
+                elevation.AirTime = 0f;
+            }
+        });
 
-        if (dSq > 1e-8f)
+        World.Query(in CarQuery, (ref Car car, ref Position position, ref Velocity velocity, ref Elevation elevation, ref Health health) =>
         {
-            if (dSq >= radius * radius)
-                return false;
-            float d = MathF.Sqrt(dSq);
-            normal = delta / d;
-            point = closest + normal * radius;
-            return true;
-        }
+            if (elevation.Height > RespawnHeight)
+                return;
 
-        // Centre is inside the box: push out along the shallowest axis.
-        float left = point.X - min.X, right = max.X - point.X;
-        float top = point.Y - min.Y, bottom = max.Y - point.Y;
-        float smallest = MathF.Min(MathF.Min(left, right), MathF.Min(top, bottom));
-        if (smallest == left) { normal = Vector2.Left; point.X = min.X - radius; }
-        else if (smallest == right) { normal = Vector2.Right; point.X = max.X + radius; }
-        else if (smallest == top) { normal = Vector2.Up; point.Y = min.Y - radius; }
-        else { normal = Vector2.Down; point.Y = max.Y + radius; }
-        return true;
+            position.Value = car.LastSafePosition;
+            car.Heading = (State.Bounds.GetCenter() - position.Value).Angle(); // face away from the edge
+            velocity.Value = Vector2.Zero;
+            elevation = new Elevation { Grounded = true };
+            health.Current -= FallDamage;
+            health.Invulnerable = 1.5f;
+            State.ShowMessage("Fell off the table!", 1.5f);
+        });
     }
 }

@@ -22,14 +22,20 @@ You can also compile without the editor: `dotnet build`.
 | Accelerate | W / ↑ | RT or A |
 | Brake / reverse | S / ↓ | LT or X |
 | Steer | A D / ← → | Left stick |
-| Handbrake (drift) | Space / Shift | B |
+| Handbrake (drift) | Shift / Ctrl | B or RB |
+| Jump | Space | Y |
 | Restart after wrecking | R / Enter | Start |
 
 ## Gameplay so far
 
 - **Micro Machines driving**: arcade grip model with drifting, a fixed overhead camera with
   look-ahead, and you can **drive off the table edge** (fall, respawn, lose some health).
+- **Height and jumping**: ruler ramps up onto books (including a two-level stack), kickers over
+  pencils, a free-standing launch ramp, and a hop button. Driving off a ramp or a book edge at
+  speed launches you; no steering in the air.
 - **Ramming**: hit bugs faster than a threshold to squash them; slower contact and they bite you.
+  Bugs only reach you at their height, so jumping clears a swarm, and a hard landing
+  **ground-pounds** everything around you. Bugs climb books, but not mugs or the cereal box.
 - **Auto-aim gun** targeting the nearest bug.
 - **Enemies**: ants, plus tanky beetles after 45 s; spawn rate ramps up and a swarm arrives every 30 s.
 - **XP gems** with magnet pickup; each level-up applies a random upgrade (fire rate, damage,
@@ -37,7 +43,24 @@ You can also compile without the editor: `dotnet build`.
 - **Miniature look**: narrow FOV + near/far depth of field (tilt-shift), soft shadows, SSAO,
   oversized props (mugs, books, cereal box, pencils, apple, coins, crumbs).
 
-All art is placeholder primitives, ready to swap for real models.
+## Using your own 3D models
+
+Placeholder shapes are used until you add models. Export as **.glb** and drop them into
+`assets/models/` with these names:
+
+| File | Replaces |
+|---|---|
+| `car.glb` | the player's car |
+| `ant.glb` | ants |
+| `beetle.glb` | beetles |
+| `gem.glb` | XP gems |
+
+They are fitted automatically: scaled to the right size, centred, and stood on the ground. Models
+keep their own materials and textures (the red hit flash then becomes a little size "pop").
+The game expects glTF's usual facing (front along +Z). If a model drives sideways or backwards,
+change its `YawDegrees` in `src/Rendering/ModelLibrary.cs` (try 0, 180 or -90).
+Tips for AI-generated models: ask for a single object, low-poly / game-ready, and keep it under
+roughly 10k triangles for the bugs, since there can be over a thousand of them on screen.
 
 ## Architecture
 
@@ -53,10 +76,13 @@ src/
   Systems/             One class per behaviour, run in a fixed order from Main
   Rendering/           MultiMesh batch renderer, car model, materials
   Levels/              Level builders (KitchenTable)
+  Ecs/Terrain.cs       Ground height + walls from Obstacle/Ramp entities
 ```
 
-- **Gameplay is pure ECS.** Godot nodes are only used for presentation. Everything runs on the
-  ground plane as `Vector2 (x, y)` → world `(x, 0, y)`.
+- **Gameplay is pure ECS.** Godot nodes are only used for presentation. Horizontal movement runs
+  on the ground plane as `Vector2 (x, y)` → world `(x, 0, y)`; height is a separate `Elevation`
+  component driven by gravity and `Terrain.GroundHeight`. Props are walls only for things below
+  their top that can't step up onto them.
 - **Rendering of crowds uses `MultiMesh`.** Enemies, bullets and gems are uploaded as one float
   buffer per frame, so thousands of entities cost a few draw calls.
 - **Structural changes** (create/destroy) never happen inside a query: destroys go through
@@ -69,5 +95,5 @@ src/
 - Pick-one-of-three upgrade screen instead of random upgrades
 - Pikmin-style follower swarm (followers as weapons)
 - Skid marks, dust particles, screen shake, sound
-- Ramps (pencils, rulers) and jumps; more levels (garden, sandbox, bathtub)
+- More levels (garden, sandbox, bathtub), loops and gaps to jump
 - Real car and bug models

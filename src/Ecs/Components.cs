@@ -3,8 +3,9 @@ using Godot;
 
 namespace BulletHeaven.Ecs;
 
-// All gameplay runs on the XZ ground plane, stored as Vector2 (x, y) => world (x, 0, y).
-// Components are plain data structs; behaviour lives in systems.
+// Horizontal movement runs on the XZ ground plane, stored as Vector2 (x, y) => world (x, 0, y).
+// Height is a separate concern (see Elevation and Terrain). Components are plain data structs;
+// behaviour lives in systems.
 
 public struct Position
 {
@@ -49,15 +50,26 @@ public struct Car
     public float Throttle; // -1..1, negative brakes then reverses
     public float Steer;    // -1..1, positive turns right on screen
     public bool Handbrake;
+    public bool Jump;
 
     // Written by CarPhysicsSystem, read by visuals.
     public float ForwardSpeed;
     public float Slip; // lateral speed, i.e. how hard the car is drifting
+    public float JumpCooldown;
 
-    // Falling off the table (Micro Machines style).
-    public float FallTimer;  // > 0 while falling
+    // Where to respawn after falling off the table.
     public Vector2 LastSafePosition;
-    public float LastSafeHeading;
+}
+
+/// <summary>Height above the table top and vertical motion. Entities without it stay on the ground.</summary>
+public struct Elevation
+{
+    public float Height;
+    public float VerticalSpeed;
+    public bool Grounded;
+    public float AirTime;
+    /// <summary>Downward speed at the moment of landing; non-zero only on the landing frame.</summary>
+    public float LandingImpact;
 }
 
 /// <summary>Tunable handling. Upgrades modify these.</summary>
@@ -71,6 +83,7 @@ public struct CarStats
     public float Grip;          // how fast sideways velocity is killed
     public float HandbrakeGrip; // lower = longer drifts
     public float RollingDrag;
+    public float JumpSpeed;
 
     public static CarStats Default => new()
     {
@@ -82,6 +95,7 @@ public struct CarStats
         Grip = 9f,
         HandbrakeGrip = 1.2f,
         RollingDrag = 0.8f,
+        JumpSpeed = 7f,
     };
 }
 
@@ -107,6 +121,7 @@ public struct Bullet
     public float Lifetime;
     public int PierceLeft;
     public Entity LastHit;
+    public float Height; // visual only; bullets hit anything they pass over
 }
 
 public struct XpGem
@@ -147,10 +162,32 @@ public enum ObstacleShape : byte
     Box,
 }
 
-/// <summary>Static prop the car and enemies collide with (mugs, books, ...).</summary>
+/// <summary>
+/// Static solid prop (mugs, books, ...). Its top is a surface you can land on; its sides are walls
+/// for anything below the top that can't step up onto it.
+/// </summary>
 public struct Obstacle
 {
     public ObstacleShape Shape;
     public float Radius;        // Circle
     public Vector2 HalfExtents; // Box, axis aligned
+    public float Height;        // top surface above the table
+}
+
+/// <summary>Axis-aligned wedge that rises along <see cref="Direction"/>. Drive up the low end;
+/// its high sides act as walls. Leaving the high end at speed launches you.</summary>
+public struct Ramp
+{
+    public Vector2 HalfExtents;
+    public Vector2 Direction; // unit vector along +X, -X, +Y or -Y
+    public float BaseHeight;
+    public float Rise;
+
+    /// <summary>Surface height at an offset from the ramp centre (assumed inside the footprint).</summary>
+    public readonly float HeightAt(Vector2 local)
+    {
+        float halfLength = Mathf.Abs(Direction.X) > 0.5f ? HalfExtents.X : HalfExtents.Y;
+        float t = (local.Dot(Direction) + halfLength) / (2f * halfLength);
+        return BaseHeight + Rise * Mathf.Clamp(t, 0f, 1f);
+    }
 }

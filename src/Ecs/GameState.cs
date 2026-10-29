@@ -11,6 +11,8 @@ public sealed class GameState
     public Entity Player;
     public readonly Rect2 Bounds;
     public readonly SpatialGrid EnemyGrid;
+    /// <summary>Static level geometry; set by Main once the level has been built.</summary>
+    public Terrain Terrain;
     public readonly Random Rng = new();
 
     public float Time;

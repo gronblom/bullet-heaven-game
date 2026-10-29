@@ -31,7 +31,8 @@ public partial class Main : Node3D
     private Camera3D _camera;
     private Vector3 _cameraTarget;
     private Hud _hud;
-    private InstancedRenderer _enemyRenderer;
+    private InstancedRenderer _antRenderer;
+    private InstancedRenderer _beetleRenderer;
     private InstancedRenderer _bulletRenderer;
     private InstancedRenderer _gemRenderer;
 
@@ -44,6 +45,7 @@ public partial class Main : Node3D
 
         BuildEnvironment();
         KitchenTable.Build(this, _world);
+        _state.Terrain = Terrain.FromWorld(_world, KitchenTable.Bounds);
 
         var start = new Vector2(0f, 8f);
         const float startHeading = -Mathf.Pi / 2f; // nose pointing up the screen
@@ -53,18 +55,23 @@ public partial class Main : Node3D
             new Velocity(),
             new Radius(0.6f),
             new Health(100f),
-            new Car { Heading = startHeading, LastSafePosition = start, LastSafeHeading = startHeading },
+            new Car { Heading = startHeading, LastSafePosition = start },
+            new Elevation { Grounded = true },
             CarStats.Default,
             Weapon.Default);
 
         _carView = new CarView(new Color(0.9f, 0.15f, 0.1f));
         AddChild(_carView);
 
-        _enemyRenderer = new InstancedRenderer(this, new SphereMesh { Radius = 1f, Height = 2f, RadialSegments = 10, Rings = 6 },
-            Materials.InstanceColored(0.35f));
+        // One batch per enemy kind so each can use its own imported model.
+        _antRenderer = new InstancedRenderer(this, new SphereMesh { Radius = 1f, Height = 2f, RadialSegments = 10, Rings = 6 },
+            Materials.InstanceColored(0.35f), ModelLibrary.Ant);
+        _beetleRenderer = new InstancedRenderer(this, new SphereMesh { Radius = 1f, Height = 2f, RadialSegments = 10, Rings = 6 },
+            Materials.InstanceColored(0.35f), ModelLibrary.Beetle);
         _bulletRenderer = new InstancedRenderer(this, new SphereMesh { Radius = 1f, Height = 2f, RadialSegments = 8, Rings = 4 },
             Materials.Glow(new Color(1f, 0.85f, 0.3f)), castShadows: false);
-        _gemRenderer = new InstancedRenderer(this, new BoxMesh(), Materials.Glow(new Color(0.3f, 1f, 0.5f), 1.5f), castShadows: false);
+        _gemRenderer = new InstancedRenderer(this, new BoxMesh(), Materials.Glow(new Color(0.3f, 1f, 0.5f), 1.5f),
+            ModelLibrary.Gem, castShadows: false);
 
         _hud = new Hud();
         AddChild(_hud);
@@ -77,6 +84,7 @@ public partial class Main : Node3D
             new EnemySteeringSystem(_world, _state),
             new MovementSystem(_world, _state),
             new CollisionSystem(_world, _state),
+            new VerticalPhysicsSystem(_world, _state),
             new EnemyGridSystem(_world, _state),
             new RamSystem(_world, _state),
             new WeaponSystem(_world, _state),
@@ -87,7 +95,7 @@ public partial class Main : Node3D
         };
 
         _cameraTarget = new Vector3(start.X, 0f, start.Y);
-        _state.ShowMessage("Ram the bugs!\nWASD / arrows to drive, Space to drift", 4f);
+        _state.ShowMessage("Ram the bugs!\nWASD / arrows to drive, Shift to drift, Space to jump", 4f);
     }
 
     public override void _Process(double delta)
@@ -126,37 +134,53 @@ public partial class Main : Node3D
         var position = _world.Get<Position>(player);
         var velocity = _world.Get<Velocity>(player);
         var car = _world.Get<Car>(player);
+        var elevation = _world.Get<Elevation>(player);
         var health = _world.Get<Health>(player);
-        _carView.Sync(position, car, health, dt);
+        _carView.Sync(position, car, elevation, health, dt);
+        var terrain = _state.Terrain;
 
-        // Camera never rotates (like Micro Machines); it trails the car with some look-ahead.
+        // Camera never rotates (like Micro Machines); it trails the car with some look-ahead,
+        // rises a little with it, but doesn't follow it down off the table.
         var lookAhead = new Vector3(velocity.Value.X, 0f, velocity.Value.Y) * 0.45f;
-        var desired = new Vector3(position.Value.X, 0f, position.Value.Y) + lookAhead;
+        float cameraHeight = Math.Max(0f, elevation.Height) * 0.6f;
+        var desired = new Vector3(position.Value.X, cameraHeight, position.Value.Y) + lookAhead;
         _cameraTarget = _cameraTarget.Lerp(desired, 1f - MathF.Exp(-4f * dt));
         _camera.Position = _cameraTarget + CameraOffset;
 
         int enemyCount = 0;
-        _enemyRenderer.Begin();
+        _antRenderer.Begin();
+        _beetleRenderer.Begin();
         _world.Query(in EnemyQuery, (ref Enemy enemy, ref Position p, ref Velocity v, ref Radius r) =>
         {
             float yaw = v.Value.LengthSquared() > 0.01f ? -v.Value.Angle() : 0f;
+            var renderer = enemy.Kind == EnemyKind.Beetle ? _beetleRenderer : _antRenderer;
             var color = enemy.HitFlash > 0f ? Colors.White : enemy.Kind == EnemyKind.Beetle ? BeetleColor : AntColor;
             float radius = r.Value;
-            _enemyRenderer.Add(new Vector3(p.Value.X, radius * 0.6f, p.Value.Y), yaw,
-                new Vector3(radius * 1.4f, radius * 0.6f, radius), color);
+            float pop = 1f + enemy.HitFlash * 2f; // hit feedback that also works for imported models
+            float ground = terrain.GroundHeight(p.Value);
+
+            if (renderer.UsesModel) // models are fitted to length 1 and stand on the ground
+                renderer.Add(new Vector3(p.Value.X, ground, p.Value.Y), yaw, Vector3.One * radius * 2f * pop, color);
+            else // squashed sphere centred above the ground
+                renderer.Add(new Vector3(p.Value.X, ground + radius * 0.6f, p.Value.Y), yaw,
+                    new Vector3(radius * 1.4f, radius * 0.6f, radius) * pop, color);
             enemyCount++;
         });
-        _enemyRenderer.End();
+        _antRenderer.End();
+        _beetleRenderer.End();
 
         _bulletRenderer.Begin();
-        _world.Query(in BulletQuery, (ref Position p) =>
-            _bulletRenderer.Add(new Vector3(p.Value.X, 0.5f, p.Value.Y), 0f, new Vector3(0.18f, 0.18f, 0.18f), Colors.White));
+        _world.Query(in BulletQuery, (ref Bullet b, ref Position p) =>
+            _bulletRenderer.Add(new Vector3(p.Value.X, b.Height, p.Value.Y), 0f, new Vector3(0.18f, 0.18f, 0.18f), Colors.White));
         _bulletRenderer.End();
 
         float spin = _state.Time * 3f;
         _gemRenderer.Begin();
         _world.Query(in GemQuery, (ref Position p) =>
-            _gemRenderer.Add(new Vector3(p.Value.X, 0.35f, p.Value.Y), spin + p.Value.X, new Vector3(0.3f, 0.3f, 0.3f), Colors.White));
+        {
+            var at = new Vector3(p.Value.X, terrain.GroundHeight(p.Value) + 0.35f, p.Value.Y);
+            _gemRenderer.Add(at, spin + p.Value.X, new Vector3(0.3f, 0.3f, 0.3f), Colors.White);
+        });
         _gemRenderer.End();
 
         _hud.Sync(_state, health, enemyCount, velocity.Value.Length(), dt);
