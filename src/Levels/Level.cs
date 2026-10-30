@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Arch.Core;
 using BulletHeaven.Ecs;
 using BulletHeaven.Rendering;
+using BulletHeaven.Systems;
 using Godot;
 
 namespace BulletHeaven.Levels;
@@ -20,11 +21,19 @@ namespace BulletHeaven.Levels;
 public abstract class Level
 {
     /// <summary>Every level, in level-select order (F1, F2, ...).</summary>
-    public static readonly Level[] All = { new Kitchen(), new Study(), new Backrooms(), new Bedroom80s() };
+    public static readonly Level[] All = { new Kitchen(), new Study(), new Windowsill() };
 
     public abstract string Name { get; }
     public abstract Rect2 Bounds { get; }
     public abstract Vector2 PlayerStart { get; }
+
+    /// <summary>A secret exit: standing in this area at or above <see cref="ExitHeight"/> unlocks <see cref="ExitTo"/>.</summary>
+    public virtual Rect2? Exit => null;
+    public virtual float ExitHeight => 0f;
+    /// <summary>Index into <see cref="All"/> of the level the exit leads to.</summary>
+    public virtual int ExitTo => -1;
+    /// <summary>Boss levels: where the Queen Ant appears, or null for none.</summary>
+    public virtual Vector2? BossSpawn => null;
 
     protected Node3D Parent { get; private set; }
     protected World World { get; private set; }
@@ -128,10 +137,10 @@ public abstract class Level
         Fader?.Register(new Rect2(at - footprint / 2f, footprint), top, materials.ToArray());
     }
 
-    /// <summary>Slope rising along an axis-aligned <paramref name="direction"/>: a wedge, or a leaning
-    /// plank (the cutting board model if generated).</summary>
+    /// <summary>Slope rising along an axis-aligned <paramref name="direction"/>: a wedge (the eraser, say), or a
+    /// leaning plank (a ruler or the cutting board). <paramref name="model"/> is fitted when generated.</summary>
     protected void Ramp(Vector2 center, Vector2 direction, float length, float width, float baseHeight, float rise,
-        Color color, bool plank = false)
+        Color color, bool plank = false, string model = null)
     {
         bool alongX = MathF.Abs(direction.X) > 0.5f;
         World.Create(new Position(center), new Ecs.Ramp
@@ -155,58 +164,33 @@ public abstract class Level
             pivot.AddChild(tilt);
             Parent.AddChild(pivot);
             var boardSize = new Vector3(MathF.Sqrt(length * length + rise * rise), 0.4f, width);
-            if (Model("cutting_board", new Vector3(0f, -0.4f, 0f), boardSize, into: tilt) == null)
+            if (Model(model ?? "cutting_board", new Vector3(0f, -0.4f, 0f), boardSize, into: tilt) == null)
                 tilt.AddChild(new MeshInstance3D { Mesh = new BoxMesh { Size = boardSize }, MaterialOverride = mat, Position = new Vector3(0f, -0.2f, 0f) });
         }
         else
         {
-            // PrismMesh with LeftToRight = 1 is a right-angle wedge rising towards +X.
-            Add(new PrismMesh { Size = new Vector3(length, rise, width), LeftToRight = 1f }, at, mat, yaw);
+            // Wedge models rise towards +X like PrismMesh with LeftToRight = 1.
+            var pivot = new Node3D { Position = new Vector3(center.X, baseHeight, center.Y), RotationDegrees = yaw };
+            Parent.AddChild(pivot);
+            if (model == null || Model(model, Vector3.Zero, new Vector3(length, rise, width), into: pivot) == null)
+                pivot.AddChild(new MeshInstance3D
+                {
+                    Mesh = new PrismMesh { Size = new Vector3(length, rise, width), LeftToRight = 1f },
+                    MaterialOverride = mat,
+                    Position = new Vector3(0f, rise / 2f, 0f),
+                });
         }
     }
 
-    /// <summary>
-    /// A glass of water: thick refracting glass, and water with ripples, refraction and a depth tint
-    /// (shaders/water.gdshader). Solid; its rim is too high to climb onto from the surface it stands on.
-    /// </summary>
-    protected void WaterGlass(Vector2 at, float baseHeight, float radius = 1.8f, float height = 5.5f, float fill = 0.72f)
-    {
-        CircleObstacle(at, radius, baseHeight + height);
-        if (!Visual)
-            return;
+    // --- gameplay objects ----------------------------------------------------------------------
 
-        var glass = new StandardMaterial3D
-        {
-            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-            AlbedoColor = new Color(0.9f, 0.96f, 1f, 0.12f),
-            Roughness = 0.03f,
-            Metallic = 0f,
-            MetallicSpecular = 0.9f,
-            RefractionEnabled = true,
-            RefractionScale = 0.03f,
-            RimEnabled = true,
-            Rim = 0.4f,
-            RimTint = 0.2f,
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-        };
-        var water = new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/water.gdshader") };
-        float wall = 0.12f, foot = 0.5f;
-        float waterHeight = (height - foot) * fill;
-        Add(new CylinderMesh { TopRadius = radius, BottomRadius = radius * 0.9f, Height = height, CapTop = false, RadialSegments = 48 },
-            new Vector3(at.X, baseHeight + height / 2f, at.Y), glass);
-        Add(new CylinderMesh { TopRadius = radius * 0.9f - wall, BottomRadius = radius * 0.9f - wall, Height = foot, RadialSegments = 48 },
-            new Vector3(at.X, baseHeight + foot / 2f, at.Y), glass);
-        float waterRadius = radius - wall;
-        Add(new CylinderMesh
-            {
-                TopRadius = waterRadius - (radius * 0.1f) * (1f - (foot + waterHeight) / height),
-                BottomRadius = radius * 0.9f - wall,
-                Height = waterHeight,
-                RadialSegments = 48,
-                Rings = 1,
-            },
-            new Vector3(at.X, baseHeight + foot + waterHeight / 2f, at.Y), water);
-    }
+    /// <summary>A permanent spill (see <see cref="Liquids"/>); drawn by Main with the puddle shader.</summary>
+    protected void Spill(Vector2 at, float height, float radius, LiquidKind kind) =>
+        Liquids.Spill(World, at, height, radius, kind, seed: at.X * 0.37f + at.Y * 0.11f);
+
+    /// <summary>An item lying on a surface, picked up by walking into it.</summary>
+    protected void Item(PickupKind kind, Vector2 at, float height) =>
+        World.Create(new Position(at), new Pickup { Kind = kind, Height = height });
 
     // --- decoration, floors, walls, lights ---------------------------------------------------
 

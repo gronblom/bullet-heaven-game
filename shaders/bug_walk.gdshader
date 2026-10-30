@@ -16,6 +16,7 @@ uniform sampler2D normal_texture : hint_normal, filter_linear_mipmap, repeat_ena
 uniform float stride_length = 0.16;
 uniform float step_height = 0.12;
 uniform float antenna_sway = 0.07;
+uniform float matte = 0.6;
 
 varying float flash;
 
@@ -44,8 +45,10 @@ void fragment() {
 	vec3 albedo = texture(albedo_texture, UV).rgb;
 	vec4 orm = texture(orm_texture, UV);
 	ALBEDO = mix(albedo, vec3(1.0, 0.95, 0.85), flash);
-	ROUGHNESS = orm.g;
-	METALLIC = orm.b;
+	// Matte, waxy chitin: only a faint sheen, no plastic highlights.
+	ROUGHNESS = mix(orm.g, 1.0, matte);
+	METALLIC = orm.b * 0.2;
+	SPECULAR = 0.25;
 	NORMAL_MAP = texture(normal_texture, UV).rgb;
 	EMISSION = vec3(1.0, 0.6, 0.3) * flash * 1.5;
 }

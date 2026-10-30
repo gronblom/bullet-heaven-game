@@ -6,10 +6,9 @@ using Godot;
 
 namespace BulletHeaven.Systems;
 
-/// <summary>Numbers for every weapon by level (1..MaxLevel). Tune here.</summary>
+/// <summary>Weapon numbers from the base stats plus picked modifiers (see <see cref="Modifiers"/>). Tune here.</summary>
 public static class WeaponStats
 {
-    public const int MaxLevel = 8;
     public const float MaxHeightDifference = 2f; // guns only hit bugs on roughly your level
 
     public static string Name(WeaponKind kind) => kind switch
@@ -19,29 +18,41 @@ public static class WeaponStats
         _ => "Seed mortar",
     };
 
+    public static string Blurb(WeaponKind kind) => kind switch
+    {
+        WeaponKind.Minigun => "A hose of tracer rounds at the nearest bug.",
+        WeaponKind.LightningWand => "Glowing orbs drift into the swarm and chain-zap it.",
+        _ => "Lobs seeds anywhere in range, even up onto the counter. Boom.",
+    };
+
+    private static float DamageScale(in WeaponSlot w) => 1f + 0.4f * w.Damage;
+    private static float RateScale(in WeaponSlot w) => MathF.Pow(0.8f, w.Rate);
+
     // Minigun: a hose of small bullets at the nearest bug.
-    public static float MinigunCooldown(int level) => MathF.Max(0.04f, 0.1f * MathF.Pow(0.88f, level - 1));
-    public static float MinigunDamage(int level) => 4f + level;
-    public static int MinigunStreams(int level) => 1 + (level >= 4 ? 1 : 0) + (level >= 7 ? 1 : 0);
-    public const float MinigunRange = 13f;
+    public static float MinigunCooldown(in WeaponSlot w) => 0.08f * RateScale(w);
+    public static float MinigunDamage(in WeaponSlot w) => 6f * DamageScale(w);
+    public static int MinigunStreams(in WeaponSlot w) => 1 + w.Count;
+    public static int MinigunPierce(in WeaponSlot w) => 1 + w.Pierce;
+    public static float MinigunRange(in WeaponSlot w) => 13f + 3f * w.Area;
 
     // Wand: slow orbs that drift into the swarm and hang around in it, zapping up to N bugs nearby
     // several times a second with chain lightning.
-    public static float WandCooldown(int level) => MathF.Max(0.9f, 2.2f - 0.2f * level);
-    public static int WandOrbs(int level) => 1 + (level >= 4 ? 1 : 0) + (level >= 7 ? 1 : 0);
-    public static float WandDamage(int level) => 6f + 3f * level;
-    public static float WandZapRadius(int level) => 3f + 0.3f * level;
-    public static int WandTargets(int level) => 3 + level / 2;
-    public static float WandOrbLifetime(int level) => 4f + 0.3f * level;
+    public static float WandCooldown(in WeaponSlot w) => 2.2f * RateScale(w);
+    public static int WandOrbs(in WeaponSlot w) => 1 + w.Count;
+    public static float WandDamage(in WeaponSlot w) => 9f * DamageScale(w);
+    public static float WandZapRadius(in WeaponSlot w) => 3.2f + 0.9f * w.Area;
+    public static int WandTargets(in WeaponSlot w) => 3 + 2 * w.Pierce;
+    public static float WandOrbLifetime(in WeaponSlot w) => 4f + 2f * w.Special;
     public const float WandRange = 12f;
     public const float OrbSpeed = 3.5f;
     public const float ZapInterval = 0.25f;
 
     // Mortar: lobs seeds at random bugs anywhere in range, including other levels, that burst on landing.
-    public static float MortarCooldown(int level) => MathF.Max(0.9f, 2.6f - 0.2f * level);
-    public static int MortarShells(int level) => 1 + level / 3;
-    public static float MortarDamage(int level) => 18f + 6f * level;
-    public static float MortarRadius(int level) => 2.2f + 0.25f * level;
+    public static float MortarCooldown(in WeaponSlot w) => 2.4f * RateScale(w);
+    public static int MortarShells(in WeaponSlot w) => 1 + w.Count;
+    public static float MortarDamage(in WeaponSlot w) => 24f * DamageScale(w);
+    public static float MortarRadius(in WeaponSlot w) => 2.5f + 0.6f * w.Area;
+    public static bool MortarSticky(in WeaponSlot w) => w.Special > 0;
     public const float MortarRange = 16f;
 }
 
@@ -68,24 +79,25 @@ public sealed class WeaponSystem(World world, GameState state) : GameSystem(worl
             if (slot.Timer > 0f)
                 return;
 
-            int level = slot.Level;
+            var w = slot;
             switch (slot.Kind)
             {
                 case WeaponKind.Minigun:
                 {
-                    int target = grid.Nearest(position, WeaponStats.MinigunRange, _scratch, height, WeaponStats.MaxHeightDifference);
+                    int target = grid.Nearest(position, WeaponStats.MinigunRange(w), _scratch, height, WeaponStats.MaxHeightDifference);
                     if (target < 0)
                         return;
-                    slot.Timer = WeaponStats.MinigunCooldown(level) * State.CooldownScale;
+                    slot.Timer = WeaponStats.MinigunCooldown(w) * State.CooldownScale;
                     slot.Spin = 1f;
                     float aim = (grid.Positions[target] - position).Angle();
-                    int streams = WeaponStats.MinigunStreams(level);
-                    float damage = WeaponStats.MinigunDamage(level) * State.DamageScale;
+                    int streams = WeaponStats.MinigunStreams(w);
+                    float damage = WeaponStats.MinigunDamage(w) * State.DamageScale;
                     for (int k = 0; k < streams; k++)
                     {
                         float angle = aim + (k - (streams - 1) * 0.5f) * 0.12f + ((float)State.Rng.NextDouble() - 0.5f) * 0.1f;
                         var v = Vector2.FromAngle(angle) * 40f + velocity * 0.5f;
-                        var bullet = new Bullet { Damage = damage, Lifetime = 0.4f, LastHit = Entity.Null, Height = height + 0.6f };
+                        var bullet = new Bullet { Damage = damage, Lifetime = 0.4f + 0.08f * w.Area, PierceLeft = WeaponStats.MinigunPierce(w),
+                            LastHit = Entity.Null, Height = height + 0.6f };
                         _spawns.Add(() => World.Create(new Position(position), new Velocity(v), new Radius(0.15f), bullet));
                     }
                     break;
@@ -95,19 +107,19 @@ public sealed class WeaponSystem(World world, GameState state) : GameSystem(worl
                     int target = grid.Nearest(position, WeaponStats.WandRange, _scratch, height, 3f);
                     if (target < 0)
                         return;
-                    slot.Timer = WeaponStats.WandCooldown(level) * State.CooldownScale;
+                    slot.Timer = WeaponStats.WandCooldown(w) * State.CooldownScale;
                     float aim = (grid.Positions[target] - position).Angle();
-                    int orbs = WeaponStats.WandOrbs(level);
+                    int orbs = WeaponStats.WandOrbs(w);
                     for (int k = 0; k < orbs; k++)
                     {
                         float angle = aim + (k - (orbs - 1) * 0.5f) * 0.5f;
                         var orb = new LightningOrb
                         {
-                            Damage = WeaponStats.WandDamage(level) * State.DamageScale,
-                            ZapRadius = WeaponStats.WandZapRadius(level),
-                            MaxTargets = WeaponStats.WandTargets(level),
+                            Damage = WeaponStats.WandDamage(w) * State.DamageScale,
+                            ZapRadius = WeaponStats.WandZapRadius(w),
+                            MaxTargets = WeaponStats.WandTargets(w),
                             ZapTimer = 0.15f,
-                            Lifetime = WeaponStats.WandOrbLifetime(level),
+                            Lifetime = WeaponStats.WandOrbLifetime(w),
                             Height = height + 1f,
                         };
                         var start = position + Vector2.FromAngle(angle) * 0.6f;
@@ -122,8 +134,8 @@ public sealed class WeaponSystem(World world, GameState state) : GameSystem(worl
                     grid.Query(position, WeaponStats.MortarRange, _scratch);
                     if (_scratch.Count == 0)
                         return;
-                    slot.Timer = WeaponStats.MortarCooldown(level) * State.CooldownScale;
-                    int shells = WeaponStats.MortarShells(level);
+                    slot.Timer = WeaponStats.MortarCooldown(w) * State.CooldownScale;
+                    int shells = WeaponStats.MortarShells(w);
                     for (int k = 0; k < shells; k++)
                     {
                         int pick = _scratch[State.Rng.Next(_scratch.Count)];
@@ -137,8 +149,9 @@ public sealed class WeaponSystem(World world, GameState state) : GameSystem(worl
                             EndHeight = endHeight,
                             Apex = 5f + MathF.Max(0f, endHeight - height),
                             Duration = 0.8f + to.DistanceTo(position) * 0.02f + k * 0.08f,
-                            Damage = WeaponStats.MortarDamage(level) * State.DamageScale,
-                            BlastRadius = WeaponStats.MortarRadius(level),
+                            Damage = WeaponStats.MortarDamage(w) * State.DamageScale,
+                            BlastRadius = WeaponStats.MortarRadius(w),
+                            Sticky = WeaponStats.MortarSticky(w),
                             Height = height + 1.2f,
                         };
                         _spawns.Add(() => World.Create(new Position(position), shell));
@@ -220,11 +233,13 @@ public sealed class ShellSystem(World world, GameState state) : GameSystem(world
     public const float BlastDuration = 0.45f;
     private readonly List<int> _hits = new();
     private readonly List<(Vector2 At, Blast Blast)> _blasts = new();
+    private readonly List<(Vector2 At, float Radius, float Height)> _jams = new();
 
     public override void Update(float dt)
     {
         var grid = State.EnemyGrid;
         _blasts.Clear();
+        _jams.Clear();
 
         World.Query(in ShellQuery, (Entity entity, ref Shell shell, ref Position position) =>
         {
@@ -250,6 +265,8 @@ public sealed class ShellSystem(World world, GameState state) : GameSystem(world
                 enemy.HitFlash = 0.15f;
             }
             _blasts.Add((shell.To, new Blast { Radius = shell.BlastRadius, Height = shell.EndHeight }));
+            if (shell.Sticky)
+                _jams.Add((shell.To, shell.BlastRadius * 0.8f, shell.EndHeight));
         });
 
         World.Query(in BlastQuery, (Entity entity, ref Blast blast) =>
@@ -261,42 +278,49 @@ public sealed class ShellSystem(World world, GameState state) : GameSystem(world
 
         foreach (var (at, blast) in _blasts)
             World.Create(new Position(at), blast);
+        foreach (var (at, radius, height) in _jams)
+            Liquids.Spill(World, at, height, radius, LiquidKind.Jam, lifetime: 6f, seed: (float)State.Rng.NextDouble());
     }
 }
 
-/// <summary>Weapon unlocks and upgrades on level-up.</summary>
+/// <summary>The weapons the player carries.</summary>
 public static class Arsenal
 {
     private static readonly QueryDescription Query = new QueryDescription().WithAll<WeaponSlot>();
 
-    /// <summary>Adds the weapon, or levels it up if already carried. Returns a message for the HUD.</summary>
-    public static string Grant(World world, WeaponKind kind)
+    public static bool Has(World world, WeaponKind kind)
     {
-        Entity owned = Entity.Null;
-        world.Query(in Query, (Entity entity, ref WeaponSlot slot) =>
-        {
-            if (slot.Kind == kind)
-                owned = entity;
-        });
-
-        if (owned == Entity.Null)
-        {
-            world.Create(new WeaponSlot { Kind = kind, Level = 1 });
-            return $"New weapon: {WeaponStats.Name(kind)}!";
-        }
-
-        ref var weapon = ref world.Get<WeaponSlot>(owned);
-        if (weapon.Level >= WeaponStats.MaxLevel)
-            return $"{WeaponStats.Name(kind)} is maxed out";
-        weapon.Level++;
-        return $"{WeaponStats.Name(kind)} level {weapon.Level}";
+        bool found = false;
+        world.Query(in Query, (ref WeaponSlot slot) => found |= slot.Kind == kind);
+        return found;
     }
 
-    public static List<(WeaponKind Kind, int Level, float Spin)> Carried(World world)
+    /// <summary>Adds the weapon if it isn't carried yet. Returns a message for the HUD.</summary>
+    public static string Grant(World world, WeaponKind kind)
     {
-        var list = new List<(WeaponKind, int, float)>();
-        world.Query(in Query, (ref WeaponSlot slot) => list.Add((slot.Kind, slot.Level, slot.Spin)));
-        list.Sort((a, b) => a.Item1.CompareTo(b.Item1));
+        if (Has(world, kind))
+            return $"{WeaponStats.Name(kind)} already carried";
+        world.Create(new WeaponSlot { Kind = kind });
+        return $"New weapon: {WeaponStats.Name(kind)}!";
+    }
+
+    public delegate void SlotChange(ref WeaponSlot slot);
+
+    /// <summary>Runs <paramref name="change"/> on the carried weapon of that kind, if any.</summary>
+    public static void Modify(World world, WeaponKind kind, SlotChange change)
+    {
+        world.Query(in Query, (ref WeaponSlot slot) =>
+        {
+            if (slot.Kind == kind)
+                change(ref slot);
+        });
+    }
+
+    public static List<WeaponSlot> Carried(World world)
+    {
+        var list = new List<WeaponSlot>();
+        world.Query(in Query, (ref WeaponSlot slot) => list.Add(slot));
+        list.Sort((a, b) => a.Kind.CompareTo(b.Kind));
         return list;
     }
 }

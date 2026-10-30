@@ -12,7 +12,8 @@ namespace BulletHeaven.Rendering;
 public sealed class OcclusionFader
 {
     private const int Samples = 16;
-    private const float FadedAlpha = 0.25f;
+    private const float FadedAlpha = 0.3f;
+    private const float SmallFadedAlpha = 0.55f;
 
     private sealed class Occluder
     {
@@ -33,7 +34,9 @@ public sealed class OcclusionFader
         float blend = 1f - MathF.Exp(-10f * dt);
         foreach (var occluder in _occluders)
         {
-            float goal = Blocks(occluder, camera, target) ? FadedAlpha : 1f;
+            // Small props (mugs, fruit) only hide part of you: fade them less so they don't vanish up close.
+            bool small = occluder.Footprint.Size.X * occluder.Footprint.Size.Y < 30f;
+            float goal = Blocks(occluder, camera, target) ? (small ? SmallFadedAlpha : FadedAlpha) : 1f;
             if (goal == 1f && occluder.Alpha == 1f && !occluder.Transparent)
                 continue; // untouched this frame
             occluder.Alpha = Mathf.Lerp(occluder.Alpha, goal, blend);
@@ -44,8 +47,9 @@ public sealed class OcclusionFader
             occluder.Transparent = transparent;
             foreach (var material in occluder.Materials)
             {
-                // Only switch to alpha blending while faded; opaque keeps shadows and SSAO correct.
-                material.Transparency = transparent ? BaseMaterial3D.TransparencyEnum.Alpha : BaseMaterial3D.TransparencyEnum.Disabled;
+                // Dithered (alpha hash) rather than blended: still writes depth, so close-up surfaces
+                // don't vanish or sort wrongly, and shadows stay. Opaque again once unfaded.
+                material.Transparency = transparent ? BaseMaterial3D.TransparencyEnum.AlphaHash : BaseMaterial3D.TransparencyEnum.Disabled;
                 var color = material.AlbedoColor;
                 color.A = occluder.Alpha;
                 material.AlbedoColor = color;

@@ -48,6 +48,8 @@ public sealed class RunnerPhysicsSystem(World world, GameState state) : GameSyst
     private const float JumpBufferTime = 0.12f;
     private const float CoyoteTime = 0.1f;
     private const float ShortHopSpeed = 3.5f;
+    public const float GlideFallSpeed = 1.8f;
+    public const float GlideSpeedScale = 1.2f;
 
     private static readonly QueryDescription Query = new QueryDescription().WithAll<Runner, RunnerStats, Velocity, Elevation>();
 
@@ -72,8 +74,16 @@ public sealed class RunnerPhysicsSystem(World world, GameState state) : GameSyst
                 elevation.VerticalSpeed = ShortHopSpeed; // released early: short hop
             }
 
-            var target = runner.Move.LimitLength(1f) * stats.MaxSpeed;
-            float rate = !elevation.Grounded ? stats.AirAcceleration
+            // Parachute: hold jump while falling to float down slowly and steer further.
+            runner.Gliding = State.HasParachute && !elevation.Grounded && runner.JumpHeld && elevation.VerticalSpeed < 0f;
+            elevation.MaxFallSpeed = runner.Gliding ? GlideFallSpeed : 0f;
+
+            float speed = runner.Gliding ? stats.MaxSpeed * GlideSpeedScale : stats.MaxSpeed;
+            if (elevation.Grounded)
+                speed *= State.PlayerSlow; // wading through spilled liquid
+            var target = runner.Move.LimitLength(1f) * speed;
+            float rate = runner.Gliding ? stats.AirAcceleration * 1.5f
+                : !elevation.Grounded ? stats.AirAcceleration
                 : runner.Move == Vector2.Zero ? stats.Friction
                 : stats.Acceleration;
             velocity.Value = velocity.Value.MoveToward(target, rate * dt);
@@ -280,6 +290,8 @@ public sealed class VerticalPhysicsSystem(World world, GameState state) : GameSy
 
             elevation.AirTime += dt;
             elevation.VerticalSpeed -= Gravity * dt;
+            if (elevation.MaxFallSpeed > 0f && elevation.VerticalSpeed < -elevation.MaxFallSpeed)
+                elevation.VerticalSpeed = MathF.Max(-elevation.MaxFallSpeed, elevation.VerticalSpeed + 3f * Gravity * dt);
             elevation.Height += elevation.VerticalSpeed * dt;
             if (elevation.Height <= ground)
             {

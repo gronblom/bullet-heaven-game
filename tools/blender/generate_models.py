@@ -1495,15 +1495,6 @@ def render_floor_preview(plane, name="floor"):
     render_preview([plane], name)
 
 
-def flat_patch(name, material, period=16.0):
-    bpy.ops.mesh.primitive_plane_add(size=period, location=(0, 0, 0))
-    plane = bpy.context.active_object
-    plane.name = name
-    return with_material(plane, material)
-
-
-# --- The Study ----------------------------------------------------------------------------------
-
 def build_armchair():
     """Chesterfield armchair, 12 wide (X) x 11 deep (Y), facing -Y. Climbable in steps:
     seat 4, arms 5.6, back 7.2 (matches the Study's collision). Origin at bottom centre."""
@@ -1724,197 +1715,167 @@ def build_rug():
     return [bake(join(parts, "rug"), 2048)]
 
 
-# --- The Backrooms ------------------------------------------------------------------------------
+# --- Kitchen extras -----------------------------------------------------------------------------
 
-def build_wallpaper_textures():
-    """Mono-yellow wallpaper with a faint repeating pattern and damp stains (seamless 16 x 16)."""
-    m = Mat("wallpaper")
-    x = m.math("ADD", m.axis("X"), 8.0)
-    y = m.math("ADD", m.axis("Y"), 8.0)
-    stripes = m.math("LESS_THAN", m.math("ABSOLUTE", m.math("SUBTRACT", m.math("FRACT", m.math("DIVIDE", x, 1.0)), 0.5)), 0.06)
-    chevron = m.math("LESS_THAN", m.math("ABSOLUTE", m.math("SUBTRACT", m.math("FRACT", m.math("ADD", m.math("DIVIDE", y, 2.0),
-                                                                                          m.math("ABSOLUTE", m.math("SUBTRACT", m.math("FRACT", x), 0.5)))), 0.5)), 0.05)
-    stains = m.seamless_noise(16.0, freq=(0.15, 0.25), detail=5.0, roughness=0.6, x=x, y=y)
-    mottle = m.seamless_noise(16.0, freq=(2.0, 2.0), detail=4.0, x=x, y=y)
-    base = m.ramp(mottle, [(0.3, (0.55, 0.47, 0.2)), (0.7, (0.65, 0.57, 0.26))])
-    base = m.mix(m.math("MULTIPLY", m.math("MAXIMUM", stripes, chevron), 0.25), base, (0.42, 0.36, 0.14))
-    damp = m.math("MULTIPLY", m.math("MAXIMUM", m.math("SUBTRACT", stains, 0.55), 0.0), 3.0)
-    m.color(m.mix(damp, base, (0.32, 0.25, 0.1)))
-    m.roughness(0.75)
-    m.normal(m.bump(mottle, strength=0.05, distance=0.01))
-    bake_texture_set(flat_patch("wallpaper", m), "wallpaper", 1024)
-    return None
+def build_ruler():
+    """Wooden ruler, 24 long (X) x 3 wide x 0.3 thick, with printed tick marks. Origin at bottom centre."""
+    m = wood("ruler_wood", (0.85, 0.66, 0.4), (0.68, 0.48, 0.26), "X", 1.0, rough=0.45)
+    ticks = Mat("ruler_ticks")
+    x, y = ticks.axis("X"), ticks.axis("Y")
+    tick = ticks.math("LESS_THAN", ticks.math("FRACT", ticks.math("MULTIPLY", x, 2.0)), 0.06)
+    long_tick = ticks.math("LESS_THAN", ticks.math("FRACT", x), 0.03)
+    edge = ticks.math("GREATER_THAN", y, 0.6)
+    marks = ticks.math("MULTIPLY", edge, ticks.math("MAXIMUM", tick, ticks.math("MULTIPLY", long_tick, ticks.math("GREATER_THAN", y, 0.2))))
+    base = ticks.ramp(ticks.noise(scale=4.0), [(0.3, (0.8, 0.6, 0.35)), (0.7, (0.9, 0.72, 0.45))])
+    ticks.color(ticks.mix(marks, base, (0.05, 0.04, 0.03)))
+    ticks.roughness(0.45)
+    body = box("ruler", (24.0, 3.0, 0.3), (0, 0, 0.15), bevel=0.04, segments=2)
+    face = box("face", (23.8, 2.9, 0.01), (0, 0, 0.305))
+    return [bake(join([with_material(body, m), with_material(face, ticks)], "ruler"), 1024)]
 
 
-def build_carpet_textures():
-    """Damp, worn office carpet: short pile, faded yellow-beige, stains (seamless 16 x 16)."""
-    m = Mat("carpet")
-    x = m.math("ADD", m.axis("X"), 8.0)
-    y = m.math("ADD", m.axis("Y"), 8.0)
-    pile = m.seamless_noise(16.0, freq=(40.0, 40.0), detail=2.0, x=x, y=y)
-    mottle = m.seamless_noise(16.0, freq=(0.6, 0.6), detail=5.0, x=x, y=y)
-    stains = m.seamless_noise(16.0, freq=(0.2, 0.2), detail=4.0, roughness=0.65, x=x, y=y)
-    base = m.ramp(mottle, [(0.3, (0.4, 0.33, 0.15)), (0.7, (0.5, 0.42, 0.2))])
-    base = m.mix(m.math("MULTIPLY", pile, 0.35), base, (0.28, 0.22, 0.09))
-    m.color(m.mix(m.math("MULTIPLY", m.math("MAXIMUM", m.math("SUBTRACT", stains, 0.58), 0.0), 3.0), base, (0.22, 0.18, 0.08)))
-    m.roughness(0.95)
-    m.normal(m.bump(pile, strength=0.5, distance=0.01))
-    bake_texture_set(flat_patch("carpet", m), "carpet", 1024)
-    return None
+def build_eraser():
+    """Pink rubber eraser shaped into a wedge rising towards +X (4 long, 3 wide, 1 high), with a
+    printed blue sleeve. Used as a kicker ramp. Origin at bottom centre."""
+    rubber = Mat("eraser_rubber")
+    rubber.color(rubber.ramp(rubber.noise(scale=6.0), [(0.3, (0.85, 0.42, 0.48)), (0.7, (0.95, 0.55, 0.6))]))
+    rubber.roughness(0.85)
+    rubber.normal(rubber.bump(rubber.noise(scale=50.0), strength=0.3, distance=0.01))
+    sleeve = plastic("eraser_sleeve", (0.1, 0.25, 0.65), rough=0.5)
+    mesh = bpy.data.meshes.new("eraser")
+    bm = bmesh.new()
+    l, w, h = 4.0, 3.0, 1.0
+    v = [bm.verts.new(co) for co in ((-l / 2, -w / 2, 0), (l / 2, -w / 2, 0), (l / 2, w / 2, 0), (-l / 2, w / 2, 0),
+                                     (l / 2, -w / 2, h), (l / 2, w / 2, h))]
+    for face in ((0, 3, 2, 1), (0, 1, 4), (3, 5, 2), (1, 2, 5, 4), (0, 4, 5, 3)):
+        bm.faces.new([v[i] for i in face])
+    bm.to_mesh(mesh)
+    bm.free()
+    wedge = link(bpy.data.objects.new("eraser", mesh))
+    bevel = wedge.modifiers.new("bevel", "BEVEL")
+    bevel.width = 0.08
+    bevel.segments = 2
+    apply_modifiers(wedge)
+    band = box("sleeve", (1.2, w + 0.04, 0.9), (1.2, 0, 0.42))
+    deform(band, lambda p: Vector((p.x, p.y, min(p.z, (p.x + l / 2) / l * h + 0.02))))
+    return [bake(join([with_material(wedge, rubber), with_material(band, sleeve)], "eraser"), 512)]
 
 
-# --- The 80s bedroom ----------------------------------------------------------------------------
-
-def build_memphis_carpet_textures():
-    """Memphis-style carpet: confetti of pastel squiggles, triangles and dots on near-black (seamless 16 x 16)."""
-    m = Mat("memphis")
-    x = m.math("ADD", m.axis("X"), 8.0)
-    y = m.math("ADD", m.axis("Y"), 8.0)
-    cell_x, cell_y = m.math("FLOOR", m.math("DIVIDE", x, 2.0)), m.math("FLOOR", m.math("DIVIDE", y, 2.0))
-    cx, cy = m.math("MODULO", cell_x, 8.0), m.math("MODULO", cell_y, 8.0)
-    pick = m.random(cx, cy)
-    hue = m.random(cy, m.math("ADD", cx, 13.0))
-    fx = m.math("SUBTRACT", m.math("FRACT", m.math("DIVIDE", x, 2.0)), 0.5)
-    fy = m.math("SUBTRACT", m.math("FRACT", m.math("DIVIDE", y, 2.0)), 0.5)
-    dot = m.math("LESS_THAN", m.math("ADD", m.math("MULTIPLY", fx, fx), m.math("MULTIPLY", fy, fy)), 0.04)
-    tri = m.math("MULTIPLY", m.math("LESS_THAN", m.math("ABSOLUTE", fx), m.math("MULTIPLY", m.math("ADD", fy, 0.3), 0.6)),
-                 m.math("LESS_THAN", fy, 0.25))
-    squiggle = m.math("LESS_THAN", m.math("ABSOLUTE", m.math("SUBTRACT", fy, m.math("MULTIPLY", m.math("SINE", m.math("MULTIPLY", fx, 14.0)), 0.12))), 0.04)
-    squiggle = m.math("MULTIPLY", squiggle, m.math("LESS_THAN", m.math("ABSOLUTE", fx), 0.4))
-    shape = m.math("ADD", m.math("MULTIPLY", dot, m.math("LESS_THAN", pick, 0.33)),
-                   m.math("ADD", m.math("MULTIPLY", tri, m.math("MULTIPLY", m.math("GREATER_THAN", pick, 0.33), m.math("LESS_THAN", pick, 0.66))),
-                          m.math("MULTIPLY", squiggle, m.math("GREATER_THAN", pick, 0.66))))
-    color = m.ramp(hue, [(0.0, (0.95, 0.3, 0.55)), (0.33, (0.15, 0.75, 0.75)), (0.66, (0.98, 0.8, 0.15)), (1.0, (0.55, 0.35, 0.9))], "CONSTANT")
-    base = m.mix(m.math("MULTIPLY", m.seamless_noise(16.0, freq=(30, 30), detail=2.0, x=x, y=y), 0.3), (0.03, 0.03, 0.05), (0.07, 0.06, 0.1))
-    m.color(m.mix(m.math("MINIMUM", shape, 1.0), base, color))
-    m.roughness(0.9)
-    m.normal(m.bump(m.seamless_noise(16.0, freq=(40, 40), detail=2.0, x=x, y=y), strength=0.4, distance=0.01))
-    bake_texture_set(flat_patch("memphis", m), "memphis", 1024)
-    return None
+def build_toaster():
+    """Chrome two-slot toaster, 6 (X) x 4 (Y) x 4.6 tall, on the kitchen counter. Origin at bottom centre."""
+    chrome = metal("toaster_chrome", (0.8, 0.81, 0.84), rough=0.12, brushed_axis="X")
+    black = plastic("toaster_black", (0.04, 0.04, 0.045), rough=0.5)
+    body = box("body", (6.0, 4.0, 4.4), (0, 0, 2.3), bevel=0.7, segments=5)
+    parts = [with_material(body, chrome),
+             with_material(box("base", (6.2, 4.2, 0.3), (0, 0, 0.15), bevel=0.1), black)]
+    for y in (-0.8, 0.8):
+        parts.append(with_material(box(f"slot{y}", (4.4, 0.45, 0.06), (0, y, 4.5)), black))
+    parts.append(with_material(box("lever", (0.5, 0.8, 0.3), (2.0, -2.2, 3.0), bevel=0.08), black))
+    parts.append(with_material(cylinder("knob", 0.35, 0.3, (-1.8, -2.15, 1.5), rot=(math.pi / 2, 0, 0), vertices=16), black))
+    return [bake(join(parts, "toaster"), 1024)]
 
 
-def build_rubiks_cube():
-    """Giant Rubik's cube, 5 x 5 x 5, scrambled stickers on black plastic. Origin at bottom centre."""
-    body = plastic("cube_black", (0.02, 0.02, 0.025), rough=0.35)
-    colors = [(0.95, 0.95, 0.95), (0.95, 0.8, 0.05), (0.8, 0.05, 0.05), (0.95, 0.35, 0.02), (0.05, 0.25, 0.8), (0.05, 0.6, 0.2)]
-    stickers = [plastic(f"sticker{i}", c, rough=0.25) for i, c in enumerate(colors)]
-    s, n = 5.0, 3
-    parts = [with_material(box("core", (s, s, s), (0, 0, s / 2), bevel=0.25, segments=3), body)]
-    rng = random.Random(3)
-    step = s / n
-    for face, (axis, sign) in enumerate((("z", 1), ("z", -1), ("x", 1), ("x", -1), ("y", 1), ("y", -1))):
-        for i in range(n):
-            for j in range(n):
-                u, v = -s / 2 + step * (i + 0.5), -s / 2 + step * (j + 0.5)
-                size, offset = step * 0.86, s / 2 + 0.03
-                if axis == "z":
-                    loc, dims = (u, v, s / 2 + sign * offset), (size, size, 0.08)
-                elif axis == "x":
-                    loc, dims = (sign * offset, u, s / 2 + v), (0.08, size, size)
-                else:
-                    loc, dims = (u, sign * offset, s / 2 + v), (size, 0.08, size)
-                parts.append(with_material(box(f"s{face}{i}{j}", dims, loc, bevel=0.08, segments=2), stickers[rng.randrange(6)]))
-    return [bake(join(parts, "rubiks_cube"), 1024)]
+def build_parachute():
+    """MDK-style round canopy at the runner's scale: striped panels, strings down to a harness at
+    the origin (between the shoulders). Shown above the runner while gliding."""
+    canopy = Mat("canopy")
+    angle = canopy.nodes.new("ShaderNodeVectorMath")
+    angle.operation = "NORMALIZE"
+    canopy.links.new(canopy.coords, angle.inputs[0])
+    sep = canopy.nodes.new("ShaderNodeSeparateXYZ")
+    canopy.links.new(angle.outputs[0], sep.inputs[0])
+    atan = canopy.math("ARCTAN2", sep.outputs["Y"], sep.outputs["X"])
+    panel = canopy.math("MODULO", canopy.math("FLOOR", canopy.math("MULTIPLY", canopy.math("ADD", atan, math.pi), 8.0 / math.tau)), 2.0)
+    canopy.color(canopy.mix(panel, (0.9, 0.35, 0.05), (0.95, 0.92, 0.85)))
+    canopy.roughness(0.7)
+    canopy.normal(canopy.bump(canopy.noise(scale=12.0), strength=0.2, distance=0.01))
+    canopy.set(("Sheen Weight", "Sheen"), 0.4)
+    cord = plastic("cord", (0.2, 0.18, 0.15), rough=0.7)
+    dome = sphere("canopy", 0.9, (0, 0, 1.4), (1.0, 1.0, 0.55), 32, 16)
+    deform(dome, lambda p: Vector((p.x, p.y, max(p.z, 1.4 - 0.05))))
+    parts = [with_material(dome, canopy)]
+    for i in range(8):
+        a = i * math.tau / 8
+        parts.append(with_material(tube(f"cord{i}", [(math.cos(a) * 0.88, math.sin(a) * 0.88, 1.36), (0, 0, 0.0)], [0.006, 0.006],
+                                        smooth_curve=False, sides=4), cord))
+    return [bake(join(parts, "parachute"), 1024)]
 
 
-def build_crt_tv():
-    """80s CRT television, 11 wide (X) x 9 deep x 9 tall, woodgrain case, glowing colour bars, facing -Y."""
-    case = wood("tv_wood", (0.35, 0.2, 0.1), (0.2, 0.1, 0.05), "X", 3.0, rough=0.5)
-    bezel = plastic("tv_bezel", (0.15, 0.15, 0.16), rough=0.4)
-    knob = metal("tv_knob", (0.7, 0.7, 0.72), rough=0.3)
-    screen = Mat("tv_screen")
-    x = screen.axis("X")
-    bars = screen.ramp(screen.math("FRACT", screen.math("DIVIDE", screen.math("ADD", x, 3.5), 7.0)),
-                       [(0.0, (0.9, 0.9, 0.9)), (0.14, (0.9, 0.9, 0.1)), (0.28, (0.1, 0.9, 0.9)), (0.42, (0.1, 0.9, 0.1)),
-                        (0.57, (0.9, 0.1, 0.9)), (0.71, (0.9, 0.1, 0.1)), (0.85, (0.1, 0.1, 0.9))], "CONSTANT")
-    scan = screen.math("GREATER_THAN", screen.math("FRACT", screen.math("MULTIPLY", screen.axis("Z"), 12.0)), 0.3)
-    lit = screen.mix(screen.math("SUBTRACT", 1.0, scan), bars, tuple(0.4 * c for c in (0.9, 0.9, 0.9)))
-    screen.color((0.02, 0.02, 0.02))
-    screen.roughness(0.05)
-    screen.emission(lit, 2.5)
-    parts = [
-        with_material(box("case", (11.0, 9.0, 9.0), (0, 0, 4.5), bevel=0.4, segments=3), case),
-        with_material(box("bezel_top", (8.5, 0.5, 0.8), (-0.8, -4.6, 7.8), bevel=0.2), bezel),
-        with_material(box("bezel_bottom", (8.5, 0.5, 0.8), (-0.8, -4.6, 1.6), bevel=0.2), bezel),
-        with_material(box("bezel_left", (0.8, 0.5, 7.0), (-4.65, -4.6, 4.7), bevel=0.2), bezel),
-        with_material(box("bezel_right", (0.8, 0.5, 7.0), (3.05, -4.6, 4.7), bevel=0.2), bezel),
-        with_material(box("panel", (1.6, 0.3, 7.0), (4.4, -4.55, 4.7), bevel=0.1), bezel),
-        with_material(box("screen", (7.0, 0.3, 5.4), (-0.8, -4.45, 4.7), bevel=0.4, segments=4), screen),
-    ]
-    for i, z in enumerate((6.5, 4.5)):
-        parts.append(with_material(cylinder(f"knob{i}", 0.4, 0.4, (4.4, -4.85, z), rot=(math.pi / 2, 0, 0), vertices=16), knob))
-    for side in (1, -1):
-        parts.append(with_material(tube(f"antenna{side}", [(0, 2.0, 9.0), (side * 3.5, 3.0, 15.0)], [0.08, 0.05]), knob))
-    return [bake(join(parts, "crt_tv"), 1024, emissive=True)]
+# --- The Windowsill (boss level) ------------------------------------------------------------------
+
+PAINTED = ((0.62, 0.6, 0.55), (0.72, 0.7, 0.64), (0.8, 0.78, 0.72), (0.86, 0.84, 0.78), (0.55, 0.53, 0.48))
 
 
-def build_cassette():
-    """Giant cassette tape, 6 (X) x 4 (Y) x 0.8 tall, lying flat, label up. Origin at bottom centre."""
-    shell = plastic("cassette_shell", (0.08, 0.08, 0.1), rough=0.3)
-    label = Mat("cassette_label")
-    y = label.axis("Y")
-    label.color(label.ramp(label.math("FRACT", label.math("DIVIDE", label.math("ADD", y, 1.4), 2.8)),
-                           [(0.0, (0.95, 0.4, 0.6)), (0.3, (0.95, 0.85, 0.3)), (0.6, (0.3, 0.8, 0.85))], "CONSTANT"))
-    label.roughness(0.6)
-    reel = plastic("cassette_reel", (0.9, 0.9, 0.92), rough=0.3)
-    parts = [with_material(box("shell", (6.0, 4.0, 0.8), (0, 0, 0.4), bevel=0.15, segments=2), shell),
-             with_material(box("label", (5.0, 2.8, 0.04), (0, 0.3, 0.82)), label),
-             with_material(box("window", (2.6, 0.9, 0.05), (0, 0.2, 0.85)), shell)]
-    for x in (-0.9, 0.9):
-        parts.append(with_material(cylinder(f"reel{x}", 0.35, 0.06, (x, 0.2, 0.86), vertices=16), reel))
-    return [bake(join(parts, "cassette"), 512)]
+def build_window_frame():
+    """Painted wooden window frame, 120 wide (X) x 60 tall (Z), 2 deep, with a central mullion and
+    a transom; open panes (the glass is added in Godot). Faces -Y. Origin at bottom centre."""
+    paint = painted("frame_paint", (0.82, 0.8, 0.75), rough=0.45, brush_axis="Z")
+    w, h, d = 120.0, 60.0, 2.0
+    parts = [with_material(box("bottom", (w, d, 3.0), (0, 0, 1.5), bevel=0.3), paint),
+             with_material(box("top", (w, d, 3.0), (0, 0, h - 1.5), bevel=0.3), paint),
+             with_material(box("left", (3.0, d, h), (-w / 2 + 1.5, 0, h / 2), bevel=0.3), paint),
+             with_material(box("right", (3.0, d, h), (w / 2 - 1.5, 0, h / 2), bevel=0.3), paint),
+             with_material(box("mullion", (2.0, d, h), (0, 0, h / 2), bevel=0.3), paint),
+             with_material(box("transom", (w, d, 2.0), (0, 0, h * 0.7), bevel=0.3), paint)]
+    for x in (-w / 4, w / 4):
+        parts.append(with_material(box(f"bar{x}", (1.0, d * 0.6, h * 0.7), (x, 0, h * 0.35), bevel=0.15), paint))
+    return [bake(join(parts, "window_frame"), 2048)]
 
 
-def build_boombox():
-    """Silver boombox, 18 (X) x 5 (Y) x 7 tall plus handle, speakers facing -Y."""
-    silver = metal("boombox_silver", (0.7, 0.71, 0.73), rough=0.35, brushed_axis="X")
-    black = plastic("boombox_black", (0.03, 0.03, 0.035), rough=0.5)
-    cone = plastic("speaker_cone", (0.08, 0.08, 0.09), rough=0.7)
-    parts = [with_material(box("body", (18.0, 5.0, 7.0), (0, 0, 3.5), bevel=0.5, segments=3), silver),
-             with_material(box("deck", (4.5, 0.3, 3.0), (0, -2.5, 3.8), bevel=0.15), black),
-             with_material(tube("handle", [(-7.0, 0, 7.0), (-6.0, 0, 8.6), (6.0, 0, 8.6), (7.0, 0, 7.0)], [0.35, 0.35, 0.35, 0.35]), black)]
-    for x in (-5.8, 5.8):
-        parts.append(with_material(cylinder(f"grille{x}", 2.8, 0.3, (x, -2.5, 3.5), rot=(math.pi / 2, 0, 0), vertices=32), black))
-        parts.append(with_material(sphere(f"cone{x}", 2.3, (x, -2.4, 3.5), (1.0, 0.25, 1.0), 24, 12), cone))
-    return [bake(join(parts, "boombox"), 1024)]
+def build_pot(name, plant):
+    """Terracotta flower pot (radius 4, 6 tall) with a plant: 'cactus' or 'basil'. Origin at bottom."""
+    clay = Mat(f"{name}_clay")
+    clay.color(clay.ramp(clay.noise(scale=3.0, detail=5.0), [(0.3, (0.5, 0.2, 0.08)), (0.7, (0.66, 0.3, 0.13))]))
+    clay.roughness(0.8)
+    clay.normal(clay.bump(clay.noise(scale=40.0), strength=0.2, distance=0.01))
+    soil = Mat(f"{name}_soil")
+    soil.color(soil.ramp(soil.voronoi(scale=20.0), [(0.0, (0.05, 0.03, 0.02)), (1.0, (0.15, 0.09, 0.05))]))
+    soil.roughness(0.95)
+    soil.normal(soil.bump(soil.voronoi(scale=20.0), strength=0.5, distance=0.02))
+    pot = lathe("pot", [(0.0, 0.0), (3.0, 0.0), (3.6, 5.0), (4.1, 5.1), (4.1, 6.0), (3.7, 6.0), (3.5, 5.4), (0.0, 5.4)], steps=40)
+    parts = [with_material(pot, clay), with_material(cylinder("soil", 3.5, 0.2, (0, 0, 5.4), vertices=40), soil)]
+    if plant == "cactus":
+        green = Mat(f"{name}_cactus")
+        ribs = green.wave("BANDS", "X", scale=2.0, vector=green.vec(scale=(1, 1, 0)))
+        green.color(green.ramp(green.noise(scale=4.0), [(0.3, (0.08, 0.25, 0.08)), (0.7, (0.15, 0.38, 0.12))]))
+        green.roughness(0.55)
+        green.normal(green.bump(ribs, strength=0.5, distance=0.05))
+        spine = plastic(f"{name}_spines", (0.9, 0.88, 0.75), rough=0.5)
+        trunk = sphere("trunk", 1.8, (0, 0, 9.5), (1.0, 1.0, 2.6), 24, 16)
+        arm1 = tube("arm1", [(1.5, 0, 9.0), (3.0, 0, 9.3), (3.2, 0, 11.5)], [0.7, 0.75, 0.6], sides=12)
+        arm2 = tube("arm2", [(-1.4, 0, 10.5), (-2.8, 0, 10.7), (-3.0, 0, 12.3)], [0.6, 0.6, 0.5], sides=12)
+        parts += [with_material(trunk, green), with_material(arm1, green), with_material(arm2, green)]
+        rng = random.Random(4)
+        for i in range(60):
+            a, z = rng.random() * math.tau, 6.5 + rng.random() * 6.0
+            r = 1.8 * math.sqrt(max(0.0, 1 - ((z - 9.5) / 4.7) ** 2)) + 0.05
+            parts.append(with_material(cylinder(f"spine{i}", 0.03, 0.4, (math.cos(a) * r, math.sin(a) * r, z),
+                                                rot=(0, math.pi / 2, a), vertices=4), spine))
+    else:
+        leaf = leaf_material(f"{name}_leaf", (0.1, 0.35, 0.06))
+        stem = leaf_material(f"{name}_stem", (0.15, 0.3, 0.08))
+        rng = random.Random(6)
+        for i in range(7):
+            a = i * math.tau / 7
+            top = (math.cos(a) * 1.5, math.sin(a) * 1.5, 9.0 + rng.random() * 2.5)
+            parts.append(with_material(tube(f"stem{i}", [(math.cos(a) * 0.4, math.sin(a) * 0.4, 5.5), top], [0.15, 0.1]), stem))
+            for j in range(4):
+                b = a + rng.uniform(-1.2, 1.2)
+                z = 7.0 + j * 1.0 + rng.random()
+                c = (math.cos(a) * (0.6 + j * 0.25) + math.cos(b) * 0.8, math.sin(a) * (0.6 + j * 0.25) + math.sin(b) * 0.8, z)
+                parts.append(with_material(sphere(f"leaf{i}{j}", 0.75, c, (1.0, 0.55, 0.12), 12, 8, rot=(0.3, -0.4, b)), leaf))
+    return [bake(join(parts, name), 1024)]
 
 
-def build_lava_lamp():
-    """Lava lamp, ~11 tall: chrome cone base and cap, glowing wax blobs in the glass. Origin at bottom."""
-    chrome = metal("lamp_chrome", (0.85, 0.86, 0.9), rough=0.1)
-    liquid = Mat("lamp_liquid")
-    liquid.color((0.6, 0.1, 0.4))
-    liquid.roughness(0.05)
-    liquid.emission((0.9, 0.25, 0.6), 1.5)
-    wax = glow("lamp_wax", (1.0, 0.45, 0.15), 4.0)
-    glass = lathe("glass", [(0.0, 3.5), (1.6, 3.5), (1.1, 9.0), (0.0, 9.0)], steps=32)
-    parts = [with_material(lathe("base", [(0.0, 0.0), (2.0, 0.0), (1.6, 3.5), (0.0, 3.5)], steps=32), chrome),
-             with_material(glass, liquid),
-             with_material(lathe("cap", [(0.0, 9.0), (1.15, 9.0), (0.6, 10.8), (0.0, 10.8)], steps=32), chrome)]
-    for i, (z, r, a) in enumerate(((4.4, 0.7, -1.9), (5.6, 0.45, 0.4), (6.9, 0.5, 2.6), (8.1, 0.35, -0.9))):
-        glass_r = 1.6 - 0.5 * (z - 3.5) / 5.5
-        reach = glass_r - r * 0.55
-        parts.append(with_material(sphere(f"blob{i}", r, (math.cos(a) * reach, math.sin(a) * reach, z), (1, 1, 1.4), 16, 10), wax))
-    return [bake(join(parts, "lava_lamp"), 1024, emissive=True)]
-
-
-def build_bed():
-    """Single bed, 20 (X) x 36 (Y), mattress top 8.6, pastel geometric duvet, headboard at +Y."""
-    frame = plastic("bed_frame", (0.85, 0.85, 0.88), rough=0.35)
-    duvet = Mat("duvet")
-    x, y = duvet.axis("X"), duvet.axis("Y")
-    zig = duvet.math("GREATER_THAN", duvet.math("FRACT", duvet.math("DIVIDE", duvet.math("ADD", y, duvet.math("ABSOLUTE", duvet.math("SUBTRACT",
-                     duvet.math("FRACT", duvet.math("DIVIDE", x, 3.0)), 0.5))), 3.0)), 0.5)
-    duvet.color(duvet.mix(zig, (0.25, 0.75, 0.78), (0.95, 0.45, 0.65)))
-    duvet.roughness(0.85)
-    duvet.normal(duvet.bump(duvet.noise(scale=3.0, detail=4.0), strength=0.3, distance=0.1))
-    duvet.set(("Sheen Weight", "Sheen"), 0.4)
-    pillow = fabric("pillow", (0.95, 0.93, 0.88), rough=0.8)
-    parts = [with_material(box("base", (20.0, 36.0, 4.0), (0, 0, 2.0), bevel=0.4, segments=2), frame),
-             with_material(box("mattress", (19.0, 33.0, 4.6), (0, -1.0, 6.3), bevel=1.0, segments=4), duvet),
-             with_material(box("headboard", (20.0, 1.5, 16.0), (0, 17.25, 8.0), bevel=0.6, segments=3), frame),
-             with_material(box("pillow", (14.0, 5.0, 2.0), (0, 13.0, 9.2), bevel=0.9, segments=4), pillow)]
-    return [bake(join(parts, "bed"), 2048)]
+def build_watering_can():
+    """Galvanised watering can, ~9 tall with spout and handle, spout towards +X. Origin at bottom."""
+    zinc = metal("zinc", (0.6, 0.62, 0.62), rough=0.45)
+    body = cylinder("body", 3.0, 6.5, (0, 0, 3.25), vertices=40)
+    parts = [with_material(body, zinc),
+             with_material(tube("spout", [(2.5, 0, 1.5), (5.5, 0, 5.5), (7.0, 0, 8.0)], [0.45, 0.35, 0.3], sides=12), zinc),
+             with_material(cylinder("rose", 0.6, 0.6, (7.2, 0, 8.3), rot=(0, 0.6, 0), vertices=16), zinc),
+             with_material(tube("handle", [(-2.0, 0, 6.5), (-1.0, 0, 9.0), (1.5, 0, 9.0), (2.0, 0, 6.5)], [0.25, 0.25, 0.25, 0.25]), zinc)]
+    return [bake(join(parts, "watering_can"), 1024)]
 
 
 MODELS = {
@@ -1944,6 +1905,16 @@ MODELS = {
     "back_counter": lambda: build_counter("back_counter", 120.0, 10.0, 14, 1),
     "fridge": build_fridge,
     "floor": build_floor_textures,
+    "ruler": build_ruler,
+    "eraser": build_eraser,
+    "toaster": build_toaster,
+    "parachute": build_parachute,
+    # The Windowsill (boss level)
+    "window_frame": build_window_frame,
+    "pot_cactus": lambda: build_pot("pot_cactus", "cactus"),
+    "pot_basil": lambda: build_pot("pot_basil", "basil"),
+    "watering_can": build_watering_can,
+    "floor_sill": lambda: build_floor_textures("floor_sill", PAINTED, row_width=4.0, board_length=16.0),
     # The Study
     "armchair": build_armchair,
     "footstool": build_footstool,
@@ -1958,17 +1929,6 @@ MODELS = {
     "book_red": lambda: build_book("book_red", (0.32, 0.05, 0.03)),
     "book_green": lambda: build_book("book_green", (0.06, 0.18, 0.08)),
     "floor_walnut": lambda: build_floor_textures("floor_walnut", WALNUT, row_width=1.2, board_length=8.0),
-    # The Backrooms
-    "wallpaper": build_wallpaper_textures,
-    "carpet": build_carpet_textures,
-    # The 80s bedroom
-    "memphis": build_memphis_carpet_textures,
-    "rubiks_cube": build_rubiks_cube,
-    "crt_tv": build_crt_tv,
-    "cassette": build_cassette,
-    "boombox": build_boombox,
-    "lava_lamp": build_lava_lamp,
-    "bed": build_bed,
 }
 
 

@@ -23,9 +23,12 @@ You can also compile without the editor: `dotnet build`.
 |---|---|---|
 | Run | WASD / arrows | Left stick |
 | Jump (hold for higher) | Space | A or Y |
-| Try a weapon (debug: add / level up minigun, wand, mortar) | 1 / 2 / 3 | |
-| Switch level (debug) | F1 / F2 / F3 / F4 | |
-| Restart after getting squashed | R / Enter | Start |
+| Glide (with the parachute): hold jump while falling | Space | A or Y |
+| Pause | Esc / P | Start |
+| Pick a card (weapon, modifier, pause menu) | 1 / 2 / 3, or arrows + Enter, or click | D-pad + A |
+| Add a weapon (debug) | Shift + 1 / 2 / 3 | |
+| Switch level (debug) | F1 / F2 / F3 | |
+| Restart after getting squashed | R | Start |
 
 **Playing as the car instead:** select the `Main` node in `scenes/main.tscn` and tick **Drive Car**
 in the Inspector. Car controls: W/S or RT/LT to drive and brake, A/D or the stick to steer,
@@ -33,25 +36,37 @@ Shift/Ctrl or B to drift, Space or Y to jump.
 
 ## Levels
 
-Switch any time with **F1-F4** (or set `Start Level` on the `Main` node in the Inspector).
+Switch any time with **F1-F3** (or set `Start Level` on the `Main` node in the Inspector).
 
 | Key | Level | Mood | The way up |
 |---|---|---|---|
 | F1 | **Kitchen** | daylight, oak floor, butcher-block counter | stools + cutting board, or the toy-block staircase, to the counter (10) |
 | F2 | **The Study** | Indiana Jones: wood panelling, Persian rug, Chesterfield armchair, golden idol, globe, chest, candle and lamp light in dusty air | books -> footstool -> seat -> armrest -> chair back -> book towers -> desk (13) |
-| F3 | **The Backrooms** | liminal: endless yellow wallpaper, damp carpet, buzzing flickering tubes, thick haze | a staircase to nowhere (12.8) |
-| F4 | **80s Bedroom** | night: Memphis carpet, neon, lava lamp, CRT TV, boombox, cassettes, Rubik's cube | cassettes -> cube -> boombox -> bed -> nightstand (9.6) |
+| F3 | **The Windowsill** (secret, boss) | outdoors on the painted sill: flower pots, a leaky watering can, the garden far below | seed trays (3.2); mostly an open arena for the **Queen Ant** |
 
-Every climbing route is checked headless by building the real level's collision and running a
-bot along it. Each level is one class in `src/Levels/` built from the helpers in `Level.cs`.
+**The secret way to the Windowsill:** on the kitchen counter, climb the ruler ramps onto the books,
+hop onto the **toaster** and grab the **parachute** (MDK style). Then jump off the toaster's back
+edge towards the window and **hold jump** to glide over to the back cabinets, which you can't reach
+any other way, and into the open window. That unlocks the Windowsill (remembered in
+`user://progress.cfg`) and takes you there with your weapons. F3 jumps straight there while developing.
 
-**Water**: glasses of water on the kitchen counter and the study desk use `shaders/water.gdshader`
-(screen-space refraction, depth tint, animated ripples, Fresnel sheen) inside refracting glass.
+**The Queen Ant** appears 12 s in: a huge ant (2,500 HP, boss bar at the top) that calls in a ring
+of ants every 7 s and every 10 s rears up for a moment and then charges in a straight line.
+
+**Spilled liquids** slow down everyone wading through them, player and bugs alike: water (70 %
+speed), coffee (60 %), juice (50 %), jam (35 %), honey (30 %). The kitchen has coffee and honey on
+the counter and water and juice on the floor; the study has tea, jam and honey; the sill has water
+from the watering can. They're drawn with `shaders/puddle.gdshader` (a wobbly blob outline, ripples
+on thin liquids and a surface-tension bulge on thick ones, glossy so the room reflects in them).
+
+Every climbing route, the parachute glide (and that it falls short without one), the puddle slow,
+the modifiers and the boss fight are checked headless against the real level collision.
+Each level is one class in `src/Levels/` built from the helpers in `Level.cs`.
 
 ## Gameplay so far
 
 - **The kitchen** (level 1): the floor is the main arena. The counter in the middle (10 up) is high ground
-  with mugs, books, a cereal box, an apple and pencils on it.
+  with mugs, books, a toaster, a cereal box, an apple and a pencil on it.
   - **Ways up**: a cutting board leaning on a stool (then jump to the counter), or the toy-block
     staircase (one jump per block). Ramps on the counter launch you, one of them right off the edge.
   - **Ways down**: anywhere. A long fall ends in a **shockwave** that flattens bugs around you.
@@ -60,20 +75,27 @@ bot along it. Each level is one class in `src/Levels/` built from the helpers in
   and variable height. **Land on a bug to stomp it** and bounce off: chain stomps across a swarm.
 - **Bugs climb**: they run straight at you and scale any wall in the way, so camping on the
   counter just means watching ants pour over the edge. They drop off edges to follow you down.
-- **Weapons** (all automatic; several can be carried, each levels up to 8):
-  - **Minigun** (start): a hose of tracer rounds at the nearest bug on your level; spinning barrels.
-  - **Ball-lightning wand** (unlocks at level 2): slow glowing orbs that drift into the swarm and
-    chain-zap several bugs at once, lighting up everything around them.
-  - **Seed mortar** (unlocks at level 3): lobs seeds at random bugs in range, even onto the
-    counter from the floor, that burst on landing.
+- **Weapons, chosen not grinded**: at the start of a run you pick **two of the three** (all fire
+  automatically):
+  - **Minigun**: a hose of tracer rounds at the nearest bug on your level; spinning barrels.
+  - **Ball-lightning wand**: slow glowing orbs that drift into the swarm and chain-zap several
+    bugs at once, lighting up everything around them.
+  - **Seed mortar**: lobs seeds at random bugs in range, even onto the counter from the floor,
+    that burst on landing.
+- **Modifiers**: every level-up pauses the game and offers **three modifiers to pick one from**, for
+  the weapons you carry (Hollow points, Extra barrel, Tungsten rounds, Twin orbs, Forked
+  lightning, Static field, Cluster seeds, Big bang, Sticky jam that leaves slowing jam where seeds
+  burst, ...) or yourself (Thick skin, Running shoes, Gem magnet, Heavy boots). Each has a pick
+  limit; the HUD lists what each weapon has. The catalogue is `Modifiers.All` in
+  `src/Systems/ProgressionSystems.cs`, the numbers are in `WeaponStats`.
 - **Bugs walk**: legs step in a tripod gait and antennae feel around (animated in a shader, so
   a thousand of them stay cheap); they turn nose-up to climb walls and tip over as they fall.
 - **Fruit** (Pikmin-style, glossy and detailed): apple, strawberry and cherries on the counter,
   an orange and a banana on the floor. All solid and climbable.
 - **Enemies**: ants, plus tanky, slow-climbing beetles after 45 s; spawn rate ramps up and a swarm
   arrives every 30 s.
-- **XP gems** with magnet pickup; level-ups unlock the wand and the mortar, then level up a
-  weapon or give a passive (damage, fire rate, running shoes, heavy boots, magnet, repair).
+- **XP gems** with magnet pickup.
+- **Pause** any time with Esc / Start (resume, restart, back to the kitchen).
 - **Look**: baked PBR models and textures, oak floorboards, narrow FOV + near/far depth of field
   (tilt-shift), soft sun shadows, real-time global illumination (SDFGI), SSAO, screen-space
   reflections, AgX tone mapping. If it runs slowly on your GPU, turn off `SdfgiEnabled` in
@@ -110,11 +132,12 @@ of the script: shapes plus a material recipe.
 | `counter.glb`, `stool.glb`, `cutting_board.glb`, `toy_block.glb` | the kitchen counter (butcher-block top, navy cabinets) and the ways up (blocks are tinted in game) |
 | `back_counter.glb`, `fridge.glb` | cabinets and fridge along the back wall |
 | `mug_white.glb`, `mug_red.glb`, `apple.glb`, `book_blue.glb`, `book_gold.glb`, `cereal_box.glb`, `pencil.glb` | props on the counter |
+| `ruler.glb`, `eraser.glb`, `toaster.glb` | ramps and the toaster on the counter |
+| `parachute.glb` | the parachute pickup and the canopy shown while gliding |
 | `ball.glb`, `dog_bowl.glb` | floor props |
 | `textures/floor_*.jpg` | oak floorboards (a seamless 16 x 16 patch; `shaders/floor.gdshader` hides the repeat) |
 | `armchair`, `footstool`, `desk`, `idol`, `globe`, `chest`, `urn`, `candle`, `panel_wall`, `rug`, `book_red`, `book_green`, `textures/floor_walnut_*` | The Study |
-| `textures/wallpaper_*`, `textures/carpet_*` | The Backrooms |
-| `bed`, `rubiks_cube`, `crt_tv`, `cassette`, `boombox`, `lava_lamp`, `textures/memphis_*` | 80s Bedroom |
+| `window_frame`, `pot_cactus`, `pot_basil`, `watering_can`, `textures/floor_sill_*` | The Windowsill |
 
 **Using your own models instead** (for example AI-generated ones): export a `.glb` with the same
 name and replace the file. Bugs, the runner and gems are auto-fitted (scaled, centred, stood on the
@@ -138,7 +161,7 @@ src/
   Systems/             One class per behaviour, run in a fixed order from Main
   Rendering/           MultiMesh batches, runner/car views, model loading, occlusion fading
 tools/blender/         generate_models.py: builds and bakes every model
-  Levels/              Level base class + Kitchen, Study, Backrooms, Bedroom80s
+  Levels/              Level base class + Kitchen, Study, Windowsill
   Ecs/Terrain.cs       Ground height + walls from Obstacle/Ramp entities
 ```
 
@@ -156,9 +179,9 @@ tools/blender/         generate_models.py: builds and bakes every model
 
 ## Ideas / next steps
 
-- Pick-one-of-three upgrade screen instead of random upgrades
 - Pikmin-style follower swarm (followers as weapons)
-- More ways around the kitchen: climbable fridge handles, a window sill, the back counter
+- More ways around the kitchen: climbable fridge handles; more items like the parachute that open up
+  hard-to-reach places (a grappling hook, spring shoes)
 - Skid marks, dust particles, screen shake, sound
 - More levels (garden, sandbox, bathtub), loops and gaps to jump
 - More models: fridge, back cabinets, walls, a car model for car mode

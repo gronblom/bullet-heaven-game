@@ -24,6 +24,8 @@ public sealed partial class RunnerView : Node3D
     private Node3D _wand;
     private Node3D _barrels;
     private float _barrelAngle;
+    private Node3D _canopy;
+    private float _canopyOpen;
 
     public RunnerView() : this(new Color(0.95f, 0.45f, 0.1f)) { }
 
@@ -61,6 +63,32 @@ public sealed partial class RunnerView : Node3D
             _minigun.Visible = minigun;
         if (_wand != null)
             _wand.Visible = wand;
+    }
+
+    /// <summary>Opens the parachute canopy over his shoulders while gliding, folding it away on landing.</summary>
+    public void SyncParachute(bool gliding, float dt)
+    {
+        if (gliding && _canopy == null)
+        {
+            _canopy = ModelLibrary.LoadProp("parachute")?.Node ?? new MeshInstance3D
+            {
+                Mesh = new SphereMesh { Radius = 0.9f, Height = 0.9f, IsHemisphere = true },
+                MaterialOverride = Materials.Plastic(new Color(0.9f, 0.35f, 0.05f), 0.7f),
+                Position = new Vector3(0f, 1.4f, 0f),
+            };
+            var harness = new Node3D { Position = new Vector3(0f, 0.85f, 0f) };
+            harness.AddChild(_canopy);
+            _canopy = harness;
+            AddChild(_canopy);
+        }
+        if (_canopy == null)
+            return;
+        _canopyOpen = Mathf.MoveToward(_canopyOpen, gliding ? 1f : 0f, dt * (gliding ? 4f : 6f));
+        _canopy.Visible = _canopyOpen > 0.02f;
+        // Pops open wide first, and sways a little.
+        float open = Mathf.Ease(_canopyOpen, 0.4f);
+        _canopy.Scale = new Vector3(open, 0.3f + 0.7f * open, open);
+        _canopy.Rotation = new Vector3(MathF.Sin(_phase * 0.3f + (float)Time.GetTicksMsec() * 0.002f) * 0.08f, 0f, 0.1f * open);
     }
 
     private Node3D Hold(string model, int arm)

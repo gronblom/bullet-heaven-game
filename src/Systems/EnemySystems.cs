@@ -22,7 +22,7 @@ public sealed class EnemySpawnSystem(World world, GameState state) : GameSystem(
         var playerPos = World.Get<Position>(State.Player).Value;
         int alive = World.CountEntities(in EnemyQuery);
 
-        _accumulator += dt * (1.5f + State.Time * 0.08f);
+        _accumulator += dt * (1.5f + State.Time * 0.08f) * State.SpawnRateScale;
         while (_accumulator >= 1f && alive < MaxEnemies)
         {
             _accumulator -= 1f;
@@ -63,12 +63,23 @@ public sealed class EnemySpawnSystem(World world, GameState state) : GameSystem(
         return point;
     }
 
-    private void Spawn(Vector2 position, EnemyKind kind)
+    private void Spawn(Vector2 position, EnemyKind kind) => Bugs.Spawn(World, State, position, kind);
+}
+
+public static class Bugs
+{
+    public const float QueenHealth = 2500f;
+
+    /// <summary>Creates a bug standing on the ground at <paramref name="position"/>; toughness grows with time.</summary>
+    public static Entity Spawn(World world, GameState state, Vector2 position, EnemyKind kind)
     {
-        float t = State.Time;
-        float jitter = (float)State.Rng.NextDouble();
+        float t = state.Time;
+        float jitter = (float)state.Rng.NextDouble();
         var (radius, enemy, health) = kind switch
         {
+            EnemyKind.Queen => (2.4f,
+                new Enemy { Kind = kind, Speed = 2.8f, ClimbSpeed = 1.5f, ContactDamage = 25f, XpValue = 60 },
+                new Health(QueenHealth)),
             EnemyKind.Beetle => (0.75f,
                 new Enemy { Kind = kind, Speed = 2.6f + jitter * 0.4f, ClimbSpeed = 1.5f, ContactDamage = 14f, XpValue = 4 },
                 new Health(45f + t * 0.4f)),
@@ -77,8 +88,8 @@ public sealed class EnemySpawnSystem(World world, GameState state) : GameSystem(
                 new Health(10f + t * 0.12f)),
         };
 
-        var elevation = new Elevation { Height = State.Terrain.GroundHeight(position), Grounded = true };
-        World.Create(new Position(position), new Velocity(), new Radius(radius), elevation, enemy, health);
+        var elevation = new Elevation { Height = state.Terrain.GroundHeight(position), Grounded = true };
+        return world.Create(new Position(position), new Velocity(), new Radius(radius), elevation, enemy, health);
     }
 }
 
@@ -129,7 +140,8 @@ public sealed class EnemySteeringSystem(World world, GameState state) : GameSyst
                 push += away / d * (minDist - d);
             }
 
-            velocity.Value = desired + push * 12f + enemy.Knockback;
+            float heft = enemy.Kind == EnemyKind.Queen ? 0.15f : 1f; // the queen barely budges
+            velocity.Value = desired + (push * 12f + enemy.Knockback) * heft;
             // Legs cycle with distance covered; small bugs take quicker steps.
             enemy.WalkPhase += desired.Length() * dt * 1.8f / radius.Value;
             enemy.Knockback *= knockbackDecay;

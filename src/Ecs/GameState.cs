@@ -21,6 +21,8 @@ public sealed class GameState
     public int Xp;
     public int XpToNext = 5;
     public bool GameOver;
+    /// <summary>Level-ups whose modifier choice hasn't been made yet; Main pauses and asks.</summary>
+    public int PendingLevelUps;
 
     // Player-wide modifiers changed by upgrades.
     public float MagnetRadius = 4f;
@@ -28,6 +30,27 @@ public sealed class GameState
     public float StompDamage = 30f;
     public float DamageScale = 1f;   // all weapons
     public float CooldownScale = 1f; // all weapons, lower is faster
+    /// <summary>How many times each modifier has been picked (by name).</summary>
+    public readonly Dictionary<string, int> Passives = new();
+
+    /// <summary>Speed multiplier from liquids the player stands in (1 = none); set by LiquidSystem.</summary>
+    public float PlayerSlow = 1f;
+    public bool HasParachute;
+
+    /// <summary>Secret exit: reaching this area at or above <see cref="ExitHeight"/> sets <see cref="ReachedExit"/>.</summary>
+    public Rect2? ExitArea;
+    public float ExitHeight;
+    public bool ReachedExit;
+
+    // Boss fight (set up by the level, run by BossSystem).
+    public bool BossLevel;
+    public Vector2 BossSpawn;
+    public Entity Boss = Entity.Null;
+    public bool BossSpawned;
+    public bool BossDefeated;
+    public float BossHealth;
+    public float BossMaxHealth;
+    public float SpawnRateScale = 1f;
 
     /// <summary>Lightning bolts to draw (visual only; damage is already dealt). Aged out by the renderer.</summary>
     public readonly List<LightningArc> Arcs = new();

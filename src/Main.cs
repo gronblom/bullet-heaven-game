@@ -19,11 +19,14 @@ public partial class Main : Node3D
     /// <summary>Tick in the Inspector (select the Main node) to play as the toy car instead of the runner.</summary>
     [Export] public bool DriveCar { get; set; }
 
-    /// <summary>Level to start in (0 = Kitchen); F1-F4 switch levels while playing.</summary>
+    /// <summary>Level to start in (0 = Kitchen); F1-F3 switch levels while playing.</summary>
     [Export] public int StartLevel { get; set; }
 
-    /// <summary>The level picked with F1-F4; survives the scene reload that switches levels.</summary>
+    /// <summary>The level picked with F1-F3 or reached by a secret exit; survives the scene reload.</summary>
     private static int? _selectedLevel;
+    /// <summary>Weapons carried through a secret exit into the next level (skips the loadout menu once).</summary>
+    private static WeaponKind[] _carriedLoadout;
+    private const string ProgressFile = "user://progress.cfg";
 
     private static readonly Vector3 CameraOffset = new(0f, 32f, 18f);
     private static readonly Color AntColor = new(0.45f, 0.08f, 0.05f);
@@ -35,6 +38,8 @@ public partial class Main : Node3D
     private static readonly QueryDescription OrbQuery = new QueryDescription().WithAll<LightningOrb, Position>();
     private static readonly QueryDescription ShellQuery = new QueryDescription().WithAll<Shell, Position>();
     private static readonly QueryDescription BlastQuery = new QueryDescription().WithAll<Blast, Position>();
+    private static readonly QueryDescription PuddleQuery = new QueryDescription().WithAll<Puddle, Position>();
+    private static readonly QueryDescription PickupQuery = new QueryDescription().WithAll<Pickup, Position>();
 
     private World _world;
     private GameState _state;
@@ -47,6 +52,10 @@ public partial class Main : Node3D
     private Camera3D _camera;
     private Vector3 _cameraTarget;
     private Hud _hud;
+    private Overlay _overlay;
+    private bool _choosing; // a loadout or level-up menu is open (pause can't close it)
+    private InstancedRenderer _puddleRenderer;
+    private readonly Dictionary<Entity, Node3D> _pickupViews = new();
     private InstancedRenderer _antRenderer;
     private InstancedRenderer _beetleRenderer;
     private InstancedRenderer _bulletRenderer;
@@ -70,6 +79,14 @@ public partial class Main : Node3D
         _level.Build(this, _world, _fader);
         _level.Atmosphere(environment, sun, this);
         _state.Terrain = Terrain.FromWorld(_world, _level.Bounds);
+        _state.ExitArea = _level.Exit;
+        _state.ExitHeight = _level.ExitHeight;
+        if (_level.BossSpawn is { } bossSpawn)
+        {
+            _state.BossLevel = true;
+            _state.BossSpawn = bossSpawn;
+            _state.SpawnRateScale = 0.6f; // the queen brings her own ants
+        }
 
         var start = _level.PlayerStart;
         const float facingUp = -Mathf.Pi / 2f; // up the screen
@@ -79,7 +96,6 @@ public partial class Main : Node3D
             new Velocity(),
             new Health(100f),
             new Elevation { Grounded = true });
-        Arsenal.Grant(_world, WeaponKind.Minigun);
 
         if (DriveCar)
         {
@@ -116,9 +132,24 @@ public partial class Main : Node3D
             VertexColorUseAsAlbedo = true,
         }, castShadows: false);
         _lightning = new LightningRenderer(this);
+        var puddleMaterial = new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/puddle.gdshader") };
+        _puddleRenderer = new InstancedRenderer(this, new PlaneMesh { Size = Vector2.One * 2f }, puddleMaterial, castShadows: false);
+        foreach (var (entity, height, at) in Pickups())
+        {
+            var view = ModelLibrary.LoadProp("parachute")?.Node ?? new MeshInstance3D
+            {
+                Mesh = new SphereMesh { Radius = 0.9f, Height = 0.9f, IsHemisphere = true },
+                MaterialOverride = Materials.Plastic(new Color(0.9f, 0.35f, 0.05f), 0.7f),
+            };
+            view.Position = new Vector3(at.X, height, at.Y);
+            AddChild(view);
+            _pickupViews[entity] = view;
+        }
 
         _hud = new Hud();
         AddChild(_hud);
+        _overlay = new Overlay();
+        AddChild(_overlay);
 
         // Order matters: input -> physics -> collisions -> spatial index -> combat -> cleanup.
         _systems = new GameSystem[]
@@ -127,9 +158,12 @@ public partial class Main : Node3D
             new RunnerPhysicsSystem(_world, _state),
             new CarPhysicsSystem(_world, _state),
             new EnemySteeringSystem(_world, _state),
+            new BossSystem(_world, _state),
+            new LiquidSystem(_world, _state),
             new MovementSystem(_world, _state),
             new CollisionSystem(_world, _state),
             new VerticalPhysicsSystem(_world, _state),
+            new ItemSystem(_world, _state),
             new EnemyGridSystem(_world, _state),
             new PlayerContactSystem(_world, _state),
             new WeaponSystem(_world, _state),
@@ -142,9 +176,108 @@ public partial class Main : Node3D
         };
 
         _cameraTarget = new Vector3(start.X, 0f, start.Y);
+        if (_carriedLoadout != null)
+        {
+            foreach (var kind in _carriedLoadout)
+                Arsenal.Grant(_world, kind);
+            _carriedLoadout = null;
+            StartRun();
+        }
+        else
+        {
+            ChooseLoadout();
+        }
+    }
+
+    private void StartRun() =>
         _state.ShowMessage($"{_level.Name}\n" + (DriveCar
             ? "WASD / arrows to drive, Shift to drift, Space to jump"
-            : "WASD / arrows / stick to run, Space / A to jump") + "\nF1-F4: switch level", 5f);
+            : "WASD / arrows / stick to run, Space / A to jump") + "\nEsc / Start: pause   F1-F3: switch level", 5f);
+
+    /// <summary>Run start: pick two of the three weapons, one card at a time.</summary>
+    private void ChooseLoadout()
+    {
+        _choosing = true;
+        var kinds = new List<WeaponKind> { WeaponKind.Minigun, WeaponKind.LightningWand, WeaponKind.SeedMortar };
+        void Offer(string title)
+        {
+            var cards = kinds.ConvertAll(k => (WeaponStats.Name(k), WeaponStats.Blurb(k)));
+            _overlay.ShowCards(title, "1-3 / click / d-pad + A", cards, i =>
+            {
+                Arsenal.Grant(_world, kinds[i]);
+                kinds.RemoveAt(i);
+                if (Arsenal.Carried(_world).Count < 2)
+                {
+                    Offer("Pick your second weapon");
+                    return;
+                }
+                _choosing = false;
+                StartRun();
+            });
+        }
+        Offer($"{_level.Name}\nPick your first weapon");
+    }
+
+    /// <summary>Level-up: pause and offer three modifiers.</summary>
+    private void ChooseModifier()
+    {
+        _state.PendingLevelUps--;
+        var offers = Modifiers.Roll(_world, _state, 3);
+        if (offers.Count == 0)
+        {
+            ref var health = ref _world.Get<Health>(_state.Player);
+            health.Current = health.Max; // everything maxed: have a heal instead
+            _state.ShowMessage($"LEVEL {_state.Level}: fully healed");
+            return;
+        }
+        _choosing = true;
+        var cards = offers.ConvertAll(m => (m.Weapon is { } kind ? $"{m.Name}\n({WeaponStats.Name(kind)})" : m.Name, m.Description));
+        _overlay.ShowCards($"LEVEL {_state.Level}", "Pick one: 1-3 / click / d-pad + A", cards, i =>
+        {
+            Modifiers.Pick(_world, _state, offers[i]);
+            _choosing = false;
+        });
+    }
+
+    private void TogglePause()
+    {
+        if (_overlay.IsOpen)
+        {
+            _overlay.Close();
+            return;
+        }
+        var cards = new List<(string, string)> { ("Resume", "Back to the bugs"), ("Restart", "Start this level over"), ("Kitchen", "Back to the first level") };
+        _overlay.ShowCards("PAUSED", "Esc / Start to resume", cards, i =>
+        {
+            if (i == 1)
+                Restart(_selectedLevel ?? StartLevel);
+            else if (i == 2)
+                Restart(0);
+        });
+    }
+
+    private void Restart(int level)
+    {
+        _selectedLevel = level;
+        GetTree().ReloadCurrentScene();
+    }
+
+    /// <summary>Through the secret exit: remember it's unlocked and carry on in the next level with the same weapons.</summary>
+    private void TakeExit()
+    {
+        var progress = new ConfigFile();
+        progress.Load(ProgressFile);
+        progress.SetValue("unlocked", Level.All[_level.ExitTo].Name, true);
+        progress.Save(ProgressFile);
+        _carriedLoadout = Arsenal.Carried(_world).ConvertAll(w => w.Kind).ToArray();
+        Restart(_level.ExitTo);
+    }
+
+    private List<(Entity Entity, float Height, Vector2 At)> Pickups()
+    {
+        var list = new List<(Entity, float, Vector2)>();
+        _world.Query(in PickupQuery, (Entity e, ref Pickup p, ref Position at) => list.Add((e, p.Height, at.Value)));
+        return list;
     }
 
     public override void _Process(double delta)
@@ -155,21 +288,33 @@ public partial class Main : Node3D
         {
             if (Input.IsActionJustPressed(GameInput.Levels[i]))
             {
-                _selectedLevel = i;
-                GetTree().ReloadCurrentScene();
+                Restart(i);
                 return;
             }
         }
 
         if (_state.GameOver)
         {
-            if (Input.IsActionJustPressed(GameInput.Restart))
+            if (Input.IsActionJustPressed(GameInput.Restart) || Input.IsActionJustPressed(GameInput.Pause))
             {
-                GetTree().ReloadCurrentScene();
+                Restart(_selectedLevel ?? StartLevel);
                 return;
             }
         }
-        else
+        else if (Input.IsActionJustPressed(GameInput.Pause) && !_choosing)
+        {
+            TogglePause();
+        }
+        else if (!_overlay.IsOpen && _state.PendingLevelUps > 0)
+        {
+            ChooseModifier();
+        }
+        else if (!_overlay.IsOpen && _state.ReachedExit)
+        {
+            TakeExit();
+            return;
+        }
+        else if (!_overlay.IsOpen)
         {
             DebugWeaponKeys();
             _state.Time += dt;
@@ -188,7 +333,7 @@ public partial class Main : Node3D
         _world = null;
     }
 
-    /// <summary>Number keys 1-3 add or level up a weapon, for trying them out without grinding.</summary>
+    /// <summary>Shift + 1-3 adds a weapon, for trying them out.</summary>
     private void DebugWeaponKeys()
     {
         for (int i = 0; i < GameInput.DebugWeapons.Length; i++)
@@ -206,7 +351,7 @@ public partial class Main : Node3D
         var elevation = _world.Get<Elevation>(player);
         var health = _world.Get<Health>(player);
         var weapons = Arsenal.Carried(_world);
-        float minigunSpin = weapons.Find(w => w.Kind == WeaponKind.Minigun).Spin;
+        float minigunSpin = weapons.Find(w => w.Kind == WeaponKind.Minigun).Spin; // default (0) if not carried
 
         if (DriveCar)
         {
@@ -216,6 +361,7 @@ public partial class Main : Node3D
         {
             _runnerView.ShowWeapons(weapons.Exists(w => w.Kind == WeaponKind.Minigun), weapons.Exists(w => w.Kind == WeaponKind.LightningWand));
             _runnerView.Sync(position, velocity, _world.Get<Runner>(player), elevation, health, minigunSpin, dt);
+            _runnerView.SyncParachute(_world.Get<Runner>(player).Gliding, dt);
         }
 
         // Camera never rotates; it trails the player with some look-ahead and follows them up and
@@ -232,8 +378,39 @@ public partial class Main : Node3D
 
         int enemyCount = DrawBugs();
         DrawProjectiles(dt);
+        DrawWorldItems();
 
         _hud.Sync(_state, _level.Name, health, enemyCount, velocity.Value.Length(), weapons, dt);
+    }
+
+    private void DrawWorldItems()
+    {
+        _puddleRenderer.Begin();
+        _world.Query(in PuddleQuery, (ref Puddle puddle, ref Position p) =>
+        {
+            float fade = puddle.Lifetime < 0f ? 1f : Math.Clamp((puddle.Lifetime - puddle.Age) / 1.5f, 0f, 1f);
+            float grow = Math.Clamp(puddle.Age * 4f + (puddle.Lifetime < 0f ? 1f : 0f), 0.3f, 1f); // fresh splats spread out
+            float thick = 1f - (puddle.Slow - 0.3f) / 0.4f;
+            float seed = puddle.Seed - MathF.Floor(puddle.Seed);
+            var at = new Vector3(p.Value.X, puddle.Height + 0.03f + seed * 0.02f, p.Value.Y); // overlapping spills don't z-fight
+            _puddleRenderer.Add(at, seed * Mathf.Tau, new Vector3(puddle.Radius, 1f, puddle.Radius) * grow,
+                Liquids.Color(puddle.Kind), custom: new Color(seed, fade, Math.Clamp(thick, 0f, 1f), 0f));
+        });
+        _puddleRenderer.End();
+
+        // Items bob and turn until picked up.
+        foreach (var (entity, view) in _pickupViews)
+        {
+            if (!_world.IsAlive(entity))
+            {
+                view.Visible = false;
+                continue;
+            }
+            var pickup = _world.Get<Pickup>(entity);
+            var at = _world.Get<Position>(entity).Value;
+            view.Position = new Vector3(at.X, pickup.Height + 0.3f + MathF.Sin(_state.Time * 2f) * 0.2f, at.Y);
+            view.Rotation = new Vector3(0f, _state.Time, 0f);
+        }
     }
 
     private int DrawBugs()

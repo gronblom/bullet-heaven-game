@@ -68,6 +68,7 @@ public struct Runner
 
     public float JumpBuffer; // remembers a jump press for a moment before landing
     public bool Jumped;      // since last grounded; blocks coyote-time double jumps
+    public bool Gliding;     // parachute open
 }
 
 public struct RunnerStats
@@ -97,6 +98,7 @@ public struct Elevation
     public float VerticalSpeed;
     public bool Grounded;
     public bool Climbing; // scaling a wall (bugs); gravity is suspended
+    public float MaxFallSpeed; // > 0 caps falling speed this frame (parachute)
     public float AirTime;
     /// <summary>Downward speed at the moment of landing; non-zero only on the landing frame.</summary>
     public float LandingImpact;
@@ -133,6 +135,17 @@ public enum EnemyKind : byte
 {
     Ant,
     Beetle,
+    Queen,
+}
+
+/// <summary>Boss behaviour state (the Queen Ant): summons, telegraphed charges.</summary>
+public struct Boss
+{
+    public float SummonTimer;
+    public float ChargeTimer;
+    public float Telegraph; // > 0 while winding up a charge
+    public float Charging;  // > 0 while charging
+    public Vector2 ChargeDirection;
 }
 
 public struct Enemy
@@ -169,14 +182,52 @@ public enum WeaponKind : byte
     SeedMortar,
 }
 
-/// <summary>A weapon the player carries. Each is its own entity, so the player can carry several;
-/// its stats come from <c>WeaponStats</c> by kind and level.</summary>
+/// <summary>A weapon the player carries. Each is its own entity, so the player can carry several.
+/// Its stats come from <c>WeaponStats</c> by kind plus the modifiers picked for it (stack counts).</summary>
 public struct WeaponSlot
 {
     public WeaponKind Kind;
-    public int Level;
+    public byte Damage;  // +40% damage each
+    public byte Rate;    // +25% fire rate each
+    public byte Count;   // +1 stream / orb / seed each
+    public byte Pierce;  // minigun: +1 pierce; wand: +2 chain targets
+    public byte Area;    // minigun: range; wand: zap radius; mortar: blast radius
+    public byte Special; // wand: +2 s orb life each; mortar: seeds leave sticky jam
     public float Timer;
     public float Spin; // minigun barrel spin, 0..1 (visual)
+}
+
+public enum LiquidKind : byte
+{
+    Water,
+    Coffee,
+    Juice,
+    Honey,
+    Jam,
+}
+
+/// <summary>A spilled liquid. Anything walking through it at its height is slowed.</summary>
+public struct Puddle
+{
+    public LiquidKind Kind;
+    public float Radius;
+    public float Height;
+    public float Slow;     // speed multiplier inside (0.3 = very sticky)
+    public float Lifetime; // < 0: permanent
+    public float Age;
+    public float Seed;     // shape variation (visual)
+}
+
+public enum PickupKind : byte
+{
+    Parachute,
+}
+
+/// <summary>An item lying in the level, collected by touching it.</summary>
+public struct Pickup
+{
+    public PickupKind Kind;
+    public float Height;
 }
 
 /// <summary>Slow floating ball of lightning that zaps nearby bugs with chain lightning.</summary>
@@ -202,6 +253,7 @@ public struct Shell
     public float Duration;
     public float Damage;
     public float BlastRadius;
+    public bool Sticky;  // leaves a jam puddle where it lands
     public float Height; // current, for drawing
 }
 

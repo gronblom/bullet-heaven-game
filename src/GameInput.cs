@@ -16,10 +16,13 @@ public static class GameInput
     public const string Jump = "jump";
     public const string RunnerJump = "runner_jump"; // A is free when not driving
     public const string Restart = "restart";
-    /// <summary>Number keys 1-3: add or level up the minigun, wand and mortar (for trying them out).</summary>
+    public const string Pause = "pause";
+    /// <summary>1-3: pick a card in a menu.</summary>
+    public static readonly string[] Choices = { "choice_1", "choice_2", "choice_3" };
+    /// <summary>Shift + 1-3: add the minigun, wand or mortar (development).</summary>
     public static readonly string[] DebugWeapons = { "debug_weapon_1", "debug_weapon_2", "debug_weapon_3" };
-    /// <summary>F1-F4: jump straight to a level (development).</summary>
-    public static readonly string[] Levels = { "level_1", "level_2", "level_3", "level_4" };
+    /// <summary>F1-F3: jump straight to a level (development).</summary>
+    public static readonly string[] Levels = { "level_1", "level_2", "level_3" };
 
     public static void Register()
     {
@@ -32,14 +35,14 @@ public static class GameInput
         Add(Handbrake, Key(Godot.Key.Shift), Key(Godot.Key.Ctrl), Button(JoyButton.B), Button(JoyButton.RightShoulder));
         Add(Jump, Key(Godot.Key.Space), Button(JoyButton.Y));
         Add(RunnerJump, Key(Godot.Key.Space), Button(JoyButton.A), Button(JoyButton.Y));
-        Add(Restart, Key(Godot.Key.R), Key(Godot.Key.Enter), Button(JoyButton.Start));
-        Add(DebugWeapons[0], Key(Godot.Key.Key1));
-        Add(DebugWeapons[1], Key(Godot.Key.Key2));
-        Add(DebugWeapons[2], Key(Godot.Key.Key3));
-        Add(Levels[0], Key(Godot.Key.F1));
-        Add(Levels[1], Key(Godot.Key.F2));
-        Add(Levels[2], Key(Godot.Key.F3));
-        Add(Levels[3], Key(Godot.Key.F4));
+        Add(Restart, Key(Godot.Key.R));
+        Add(Pause, Key(Godot.Key.Escape), Key(Godot.Key.P), Button(JoyButton.Start));
+        for (int i = 0; i < Choices.Length; i++)
+            Add(Choices[i], Key(Godot.Key.Key1 + i), Key(Godot.Key.Kp1 + i));
+        for (int i = 0; i < DebugWeapons.Length; i++)
+            Add(DebugWeapons[i], new InputEventKey { PhysicalKeycode = Godot.Key.Key1 + i, ShiftPressed = true });
+        for (int i = 0; i < Levels.Length; i++)
+            Add(Levels[i], Key(Godot.Key.F1 + i));
     }
 
     private static void Add(string action, params InputEvent[] events)

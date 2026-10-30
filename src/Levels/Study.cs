@@ -1,3 +1,4 @@
+using BulletHeaven.Ecs;
 using BulletHeaven.Rendering;
 using Godot;
 
@@ -6,7 +7,7 @@ namespace BulletHeaven.Levels;
 /// <summary>
 /// Level 2. An adventurer's study: dark wood panelling, a walnut floor with a Persian rug, a leather
 /// Chesterfield armchair, towers of old books and a big partners' desk with a golden idol, a
-/// candle and a glass of water on it. Warm lamp and candle light in dusty air.
+/// candle and a spilt inkwell on it. Warm lamp and candle light in dusty air.
 ///
 /// The way up is a staircase of furniture, each step about one jump (1.6) high:
 /// book pile 1.6 -> footstool 3.2 -> seat 4 -> armrest 5.6 -> chair back 7.2 -> book towers
@@ -92,7 +93,7 @@ public sealed class Study : Level
         const float b = DeskTop;
         Round("idol", new Vector2(27f, -33f), b, 0.9f, 3.4f, new Color(0.9f, 0.7f, 0.25f));
         Round("candle", new Vector2(11f, -36f), b, 1f, 4.5f, new Color(0.9f, 0.85f, 0.7f), sphere: false);
-        WaterGlass(new Vector2(31f, -27.5f), b);
+        Spill(new Vector2(31f, -28f), b, 2.2f, LiquidKind.Coffee); // cold tea gone over the papers
         Block(new Vector2(16f, -28f), new Vector2(6f, 4f), b, 1.2f, new Color(0.35f, 0.06f, 0.04f), "book_red");
     }
 
@@ -102,6 +103,8 @@ public sealed class Study : Level
         Block(new Vector2(48f, 18f), new Vector2(8f, 5f), 0f, 5f, new Color(0.3f, 0.18f, 0.08f), "chest");
         Round("urn", new Vector2(-55f, 30f), 0f, 2f, 7f, new Color(0.6f, 0.27f, 0.12f));
         Round("urn", new Vector2(58f, -12f), 0f, 2f, 7f, new Color(0.6f, 0.27f, 0.12f));
+        Spill(new Vector2(52f, -6f), 0f, 3.5f, LiquidKind.Jam);   // something sticky leaked out of the urn
+        Spill(new Vector2(-40f, 20f), 0f, 4f, LiquidKind.Honey);
 
         // Brass reading lamp by the armchair.
         CircleObstacle(new Vector2(-26f, -38f), 1.2f, 16f);
