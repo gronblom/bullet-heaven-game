@@ -63,8 +63,8 @@ public sealed class LightningRenderer
             foreach (var arc in arcs)
             {
                 float fade = 1f - arc.Age / ArcLifetime;
-                Bolt(arc.From, arc.To, camera, 0.09f, new Color(0.5f, 0.75f, 1f, fade));     // glow
-                Bolt(arc.From, arc.To, camera, 0.035f, new Color(0.95f, 0.98f, 1f, fade));   // hot core
+                Bolt(arc.From.ToGodot(), arc.To.ToGodot(), camera, 0.09f, new Color(0.5f, 0.75f, 1f, fade));     // glow
+                Bolt(arc.From.ToGodot(), arc.To.ToGodot(), camera, 0.035f, new Color(0.95f, 0.98f, 1f, fade));   // hot core
             }
             _mesh.SurfaceEnd();
         }

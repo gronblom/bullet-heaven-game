@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Arch.Core;
-using Godot;
+using BulletHeaven.Numerics;
 
 namespace BulletHeaven.Ecs;
 
@@ -67,7 +67,7 @@ public sealed class SpatialGrid
 
     public void Build()
     {
-        Array.Clear(_cellStart);
+        Array.Clear(_cellStart, 0, _cellStart.Length);
         for (int i = 0; i < Count; i++)
         {
             int cell = CellIndex(CellX(Positions[i].X), CellY(Positions[i].Y));

@@ -1,6 +1,5 @@
 using BulletHeaven.Ecs;
-using BulletHeaven.Rendering;
-using Godot;
+using BulletHeaven.Numerics;
 
 namespace BulletHeaven.Levels;
 
@@ -38,44 +37,35 @@ public sealed class Windowsill : Level
     private void Window()
     {
         var b = Bounds;
-        if (!Visual)
-            return;
+        var paint = new Look(new Color(0.82f, 0.8f, 0.75f), 0.45f);
 
         // The window behind (north): the frame, glass you can see the kitchen glow through.
-        if (Model("window_frame", new Vector3(0f, 0f, b.Position.Y - 1f)) == null)
-            Add(new BoxMesh { Size = new Vector3(120f, 60f, 2f) }, new Vector3(0f, 30f, b.Position.Y - 1f),
-                Materials.Plastic(new Color(0.82f, 0.8f, 0.75f), 0.45f));
-        Add(new BoxMesh { Size = new Vector3(118f, 58f, 0.2f) }, new Vector3(0f, 30f, b.Position.Y - 1.5f),
-            Materials.Glow(new Color(1f, 0.85f, 0.6f), 0.35f));
+        Model("window_frame", new Vector3(0f, 0f, b.Position.Y - 1f), null, Shape.Box, new Vector3(120f, 60f, 2f), paint);
+        Primitive(Shape.Box, new Vector3(0f, 1f, b.Position.Y - 1.5f), new Vector3(118f, 58f, 0.2f),
+            new Look(new Color(1f, 0.85f, 0.6f), Glow: 0.35f));
 
         // The drop to the garden (south): a lip, then green far below.
-        Add(new BoxMesh { Size = new Vector3(b.Size.X + 4f, 1f, 1.5f) }, new Vector3(0f, 0.5f, b.End.Y + 0.75f),
-            Materials.Plastic(new Color(0.82f, 0.8f, 0.75f), 0.45f));
-        Add(new PlaneMesh { Size = new Vector2(600f, 400f) }, new Vector3(0f, -60f, b.End.Y + 180f),
-            Materials.Plastic(new Color(0.18f, 0.35f, 0.1f), 0.95f));
+        Primitive(Shape.Box, new Vector3(0f, 0f, b.End.Y + 0.75f), new Vector3(b.Size.X + 4f, 1f, 1.5f), paint);
+        Primitive(Shape.Plane, new Vector3(0f, -60f, b.End.Y + 180f), new Vector3(600f, 0f, 400f), new Look(new Color(0.18f, 0.35f, 0.1f), 0.95f));
 
         // Brick wall either side.
-        var brick = Materials.Plastic(new Color(0.45f, 0.2f, 0.12f), 0.9f);
-        Add(new BoxMesh { Size = new Vector3(4f, 70f, b.Size.Y + 6f) }, new Vector3(b.Position.X - 2f, 25f, 0f), brick);
-        Add(new BoxMesh { Size = new Vector3(4f, 70f, b.Size.Y + 6f) }, new Vector3(b.End.X + 2f, 25f, 0f), brick);
+        var brick = new Look(new Color(0.45f, 0.2f, 0.12f), 0.9f);
+        Primitive(Shape.Box, new Vector3(b.Position.X - 2f, -10f, 0f), new Vector3(4f, 70f, b.Size.Y + 6f), brick);
+        Primitive(Shape.Box, new Vector3(b.End.X + 2f, -10f, 0f), new Vector3(4f, 70f, b.Size.Y + 6f), brick);
     }
 
-    public override void Atmosphere(Godot.Environment environment, DirectionalLight3D sun, Node3D root)
+    // Outdoors in the late afternoon: bright sky, warm low sun, a little haze.
+    public override Atmosphere Atmosphere => new()
     {
-        // Outdoors in the late afternoon: bright sky, warm low sun, a little haze.
-        if (environment.Sky.SkyMaterial is ProceduralSkyMaterial sky)
-        {
-            sky.SkyTopColor = new Color(0.35f, 0.55f, 0.85f);
-            sky.SkyHorizonColor = new Color(0.85f, 0.75f, 0.6f);
-            sky.GroundHorizonColor = new Color(0.5f, 0.55f, 0.35f);
-            sky.GroundBottomColor = new Color(0.15f, 0.25f, 0.1f);
-        }
-        environment.AmbientLightEnergy = 0.6f;
-        environment.FogEnabled = true;
-        environment.FogLightColor = new Color(0.8f, 0.8f, 0.85f);
-        environment.FogDensity = 0.002f;
-        sun.LightEnergy = 1.8f;
-        sun.LightColor = new Color(1f, 0.85f, 0.65f);
-        sun.RotationDegrees = new Vector3(-40f, -30f, 0f);
-    }
+        SkyTop = new Color(0.35f, 0.55f, 0.85f),
+        SkyHorizon = new Color(0.85f, 0.75f, 0.6f),
+        GroundHorizon = new Color(0.5f, 0.55f, 0.35f),
+        GroundBottom = new Color(0.15f, 0.25f, 0.1f),
+        AmbientEnergy = 0.6f,
+        FogDensity = 0.002f,
+        FogColor = new Color(0.8f, 0.8f, 0.85f),
+        SunEnergy = 1.8f,
+        SunColor = new Color(1f, 0.85f, 0.65f),
+        SunRotationDegrees = new Vector3(-40f, -30f, 0f),
+    };
 }

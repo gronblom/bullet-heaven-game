@@ -1,8 +1,7 @@
 using System;
 using System.Collections.Generic;
 using BulletHeaven.Ecs;
-using BulletHeaven.Rendering;
-using Godot;
+using BulletHeaven.Numerics;
 
 namespace BulletHeaven.Levels;
 
@@ -44,37 +43,25 @@ public sealed class Kitchen : Level
     private void Room()
     {
         Floor("floor", new Color(0.4f, 0.27f, 0.15f));
-        if (Visual)
-        {
-            RoomWalls(Materials.Plastic(new Color(0.55f, 0.48f, 0.4f), 0.9f));
-            // The window over the back cabinets, open at the bottom: the way out to the windowsill.
-            Add(new BoxMesh { Size = new Vector3(30f, 18f, 0.3f) }, new Vector3(10f, CounterTop + 9f, Bounds.Position.Y + 0.2f),
-                Materials.Glow(new Color(0.85f, 0.93f, 1f), 1.4f));
-        }
+        RoomWalls(new Look(new Color(0.55f, 0.48f, 0.4f), 0.9f));
+        // The window over the back cabinets, open at the bottom: the way out to the windowsill.
+        Primitive(Shape.Box, new Vector3(10f, CounterTop, Bounds.Position.Y + 0.2f), new Vector3(30f, 18f, 0.3f),
+            new Look(new Color(0.85f, 0.93f, 1f), Glow: 1.4f));
 
         // Fridge and a row of cabinets along the back wall.
         Block(new Vector2(-66f, -45f), new Vector2(24f, 20f), 0f, 45f, new Color(0.92f, 0.93f, 0.95f), "fridge");
         BoxObstacle(new Vector2(10f, -50f), new Vector2(120f, 10f), CounterTop);
-        if (Visual && Model("back_counter", new Vector3(10f, 0f, -50f), new Vector3(121f, CounterTop, 11f)) == null)
-            Add(new BoxMesh { Size = new Vector3(120f, CounterTop, 10f) }, new Vector3(10f, CounterTop / 2f, -50f),
-                Materials.Plastic(new Color(0.1f, 0.14f, 0.24f), 0.6f));
+        Model("back_counter", new Vector3(10f, 0f, -50f), new Vector3(121f, CounterTop, 11f), Shape.Box,
+            new Vector3(120f, CounterTop, 10f), new Look(new Color(0.1f, 0.14f, 0.24f)));
     }
 
     private void KitchenCounter()
     {
         var center = Counter.GetCenter();
         BoxObstacle(center, Counter.Size, CounterTop);
-        if (!Visual)
-            return;
         var size = new Vector3(Counter.Size.X + 1f, CounterTop, Counter.Size.Y + 1f);
-        var materials = Model("counter", new Vector3(center.X, 0f, center.Y), size);
-        if (materials == null)
-        {
-            var mat = Materials.Plastic(new Color(0.1f, 0.14f, 0.24f), 0.6f);
-            Add(new BoxMesh { Size = size }, new Vector3(center.X, CounterTop / 2f, center.Y), mat);
-            materials = new BaseMaterial3D[] { mat };
-        }
-        Fader?.Register(Counter.Grow(0.5f), CounterTop, materials);
+        Model("counter", new Vector3(center.X, 0f, center.Y), size, Shape.Box, size, new Look(new Color(0.1f, 0.14f, 0.24f)),
+            fade: Counter.Grow(0.5f), fadeTop: CounterTop);
     }
 
     private void CounterProps()
@@ -152,9 +139,4 @@ public sealed class Kitchen : Level
 
     // Treated as solid so nothing walks between the legs (the height map has no overhangs).
     private void Stool(Vector2 at) => Round("stool", at, 0f, 3f, StoolSeat, new Color(0.6f, 0.4f, 0.22f), sphere: false);
-
-    public override void Atmosphere(Godot.Environment environment, DirectionalLight3D sun, Node3D root)
-    {
-        // Daylight through the window: the defaults set up in Main.
-    }
 }

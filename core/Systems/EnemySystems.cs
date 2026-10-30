@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using Arch.Core;
 using BulletHeaven.Ecs;
-using Godot;
+using BulletHeaven.Numerics;
 
 namespace BulletHeaven.Systems;
 

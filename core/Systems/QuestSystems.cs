@@ -1,7 +1,7 @@
 using System;
 using Arch.Core;
 using BulletHeaven.Ecs;
-using Godot;
+using BulletHeaven.Numerics;
 
 namespace BulletHeaven.Systems;
 

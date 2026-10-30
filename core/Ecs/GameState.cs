@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Arch.Core;
-using Godot;
+using BulletHeaven.Numerics;
 
 namespace BulletHeaven.Ecs;
 
@@ -9,6 +9,8 @@ namespace BulletHeaven.Ecs;
 public sealed class GameState
 {
     public Entity Player;
+    /// <summary>This frame's controls, written by the engine front-end before the systems run.</summary>
+    public PlayerInput Input;
     public readonly Rect2 Bounds;
     public readonly SpatialGrid EnemyGrid;
     /// <summary>Static level geometry; set by Main once the level has been built.</summary>
@@ -84,6 +86,19 @@ public sealed class GameState
         Message = text;
         MessageTimer = seconds;
     }
+}
+
+/// <summary>Engine-independent controls. Move is on the ground plane (screen up = -Y), length &lt;= 1.</summary>
+public struct PlayerInput
+{
+    public Vector2 Move;
+    public bool JumpPressed; // this frame
+    public bool JumpHeld;
+    // Car mode
+    public float Throttle;   // -1 brake/reverse .. 1
+    public float Steer;      // -1 left .. 1 right
+    public bool Handbrake;
+    public bool CarJump;     // this frame
 }
 
 /// <summary>One lightning bolt between two points, flickering for a moment.</summary>

@@ -76,8 +76,9 @@ public partial class Main : Node3D
         _fader = new OcclusionFader();
 
         var (environment, sun) = BuildEnvironment();
-        _level.Build(this, _world, _fader);
-        _level.Atmosphere(environment, sun, this);
+        var layout = _level.Build(_world);
+        LevelView.Build(this, _level, layout, _fader);
+        LevelView.Atmosphere(environment, sun, this, _level.Atmosphere, layout);
         _state.Terrain = Terrain.FromWorld(_world, _level.Bounds);
         _state.ExitArea = _level.Exit;
         _state.ExitHeight = _level.ExitHeight;
@@ -276,7 +277,7 @@ public partial class Main : Node3D
     private List<(Entity Entity, float Height, Vector2 At)> Pickups()
     {
         var list = new List<(Entity, float, Vector2)>();
-        _world.Query(in PickupQuery, (Entity e, ref Pickup p, ref Position at) => list.Add((e, p.Height, at.Value)));
+        _world.Query(in PickupQuery, (Entity e, ref Pickup p, ref Position at) => list.Add((e, p.Height, at.Value.ToGodot())));
         return list;
     }
 
@@ -317,6 +318,7 @@ public partial class Main : Node3D
         else if (!_overlay.IsOpen)
         {
             DebugWeaponKeys();
+            ReadInput();
             _state.Time += dt;
             foreach (var system in _systems)
                 system.Update(dt);
@@ -324,6 +326,22 @@ public partial class Main : Node3D
         }
 
         SyncVisuals(dt);
+    }
+
+    /// <summary>Godot's input map into the engine-independent controls the gameplay systems read.</summary>
+    private void ReadInput()
+    {
+        // Screen up is -Y on the ground plane, so the vector maps straight onto it.
+        _state.Input = new PlayerInput
+        {
+            Move = Input.GetVector(GameInput.SteerLeft, GameInput.SteerRight, GameInput.MoveUp, GameInput.MoveDown).ToCore(),
+            JumpPressed = Input.IsActionJustPressed(GameInput.RunnerJump),
+            JumpHeld = Input.IsActionPressed(GameInput.RunnerJump),
+            Throttle = Input.GetActionStrength(GameInput.Accelerate) - Input.GetActionStrength(GameInput.Brake),
+            Steer = Input.GetAxis(GameInput.SteerLeft, GameInput.SteerRight),
+            Handbrake = Input.IsActionPressed(GameInput.Handbrake),
+            CarJump = Input.IsActionJustPressed(GameInput.Jump),
+        };
     }
 
     public override void _ExitTree()
@@ -394,7 +412,7 @@ public partial class Main : Node3D
             float seed = puddle.Seed - MathF.Floor(puddle.Seed);
             var at = new Vector3(p.Value.X, puddle.Height + 0.03f + seed * 0.02f, p.Value.Y); // overlapping spills don't z-fight
             _puddleRenderer.Add(at, seed * Mathf.Tau, new Vector3(puddle.Radius, 1f, puddle.Radius) * grow,
-                Liquids.Color(puddle.Kind), custom: new Color(seed, fade, Math.Clamp(thick, 0f, 1f), 0f));
+                Liquids.Color(puddle.Kind).ToGodot(), custom: new Color(seed, fade, Math.Clamp(thick, 0f, 1f), 0f));
         });
         _puddleRenderer.End();
 
@@ -420,7 +438,7 @@ public partial class Main : Node3D
         _beetleRenderer.Begin();
         _world.Query(in EnemyQuery, (ref Enemy enemy, ref Position p, ref Velocity v, ref Radius r, ref Elevation e) =>
         {
-            var heading = v.Value.LengthSquared() > 0.01f ? v.Value.Normalized() : Vector2.Right;
+            var heading = v.Value.LengthSquared() > 0.01f ? v.Value.Normalized().ToGodot() : Vector2.Right;
             float yaw = -heading.Angle();
             var renderer = enemy.Kind == EnemyKind.Beetle ? _beetleRenderer : _antRenderer;
             float radius = r.Value;

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Engine-independent gameplay: ECS components and systems, level layouts, maths.
+    Shared by the Godot game (project root) and the Unity version (unity/), which only draw it.
+    netstandard2.1 so Unity can load the built DLL (see unity/README.md).
+  -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>12</LangVersion>
+    <Nullable>disable</Nullable>
+    <RootNamespace>BulletHeaven</RootNamespace>
+    <AssemblyName>BulletHeaven.Core</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Arch" Version="2.1.0" />
+  </ItemGroup>
+</Project>

@@ -13,3 +13,9 @@ obj/
 
 # Model previews (tools/blender/generate_models.py --preview)
 assets/previews/
+
+# Core library and tests build output
+core/bin/
+core/obj/
+tests/bin/
+tests/obj/

@@ -1,6 +1,5 @@
 using BulletHeaven.Ecs;
-using BulletHeaven.Rendering;
-using Godot;
+using BulletHeaven.Numerics;
 
 namespace BulletHeaven.Levels;
 
@@ -29,31 +28,15 @@ public sealed class Study : Level
         Armchair();
         DeskAndArtifacts();
         FloorArtifacts();
+        Lights();
     }
 
     private void Room()
     {
         Floor("floor_walnut", new Color(0.18f, 0.08f, 0.04f), toneVariation: 0.2f);
         Decor("rug", new Vector3(0f, 0f, 8f));
-        if (!Visual)
-            return;
-
         // Wood panelling all round (fallback: plain dark walls).
-        if (ModelLibrary.LoadProp("panel_wall") == null)
-        {
-            RoomWalls(Materials.Plastic(new Color(0.2f, 0.08f, 0.04f), 0.5f));
-            return;
-        }
-        var b = Bounds;
-        for (float x = b.Position.X + 6f; x < b.End.X; x += 16f)
-            Decor("panel_wall", new Vector3(x, 0f, b.Position.Y - 1f));
-        for (float y = b.Position.Y + 8f; y < b.End.Y; y += 16f)
-        {
-            Decor("panel_wall", new Vector3(b.Position.X - 1f, 0f, y), yawDegrees: 90f);
-            Decor("panel_wall", new Vector3(b.End.X + 1f, 0f, y), yawDegrees: -90f);
-        }
-        Add(new BoxMesh { Size = new Vector3(b.Size.X + 4f, 1.2f, 1f) }, new Vector3(b.GetCenter().X, 0.6f, b.End.Y + 0.5f),
-            Materials.Plastic(new Color(0.2f, 0.08f, 0.04f), 0.5f));
+        RoomWalls(new Look(new Color(0.2f, 0.08f, 0.04f), 0.5f), panelModel: "panel_wall");
     }
 
     private void Armchair()
@@ -63,22 +46,12 @@ public sealed class Study : Level
         BoxObstacle(Chair + new Vector2(5.05f, 0.5f), new Vector2(2.2f, 9f), 5.6f);
         BoxObstacle(Chair + new Vector2(-5.05f, 0.5f), new Vector2(2.2f, 9f), 5.6f);
         BoxObstacle(Chair + new Vector2(0f, -4.5f), new Vector2(12f, 2f), 7.2f);
-        if (Visual)
-        {
-            var materials = Model("armchair", new Vector3(Chair.X, 0f, Chair.Y));
-            if (materials == null)
-            {
-                var leather = Materials.Plastic(new Color(0.3f, 0.06f, 0.04f), 0.4f);
-                Add(new BoxMesh { Size = new Vector3(12f, 4f, 11f) }, new Vector3(Chair.X, 2f, Chair.Y), leather);
-                Add(new BoxMesh { Size = new Vector3(12f, 7.2f, 2f) }, new Vector3(Chair.X, 3.6f, Chair.Y - 4.5f), leather);
-                materials = new BaseMaterial3D[] { leather };
-            }
-            Fader?.Register(new Rect2(Chair - new Vector2(6f, 5.5f), new Vector2(12f, 11f)), 7.2f, materials);
-        }
+        Model("armchair", new Vector3(Chair.X, 0f, Chair.Y), null, Shape.Box, new Vector3(12f, 5f, 11f),
+            new Look(new Color(0.3f, 0.06f, 0.04f), 0.4f), fade: new Rect2(Chair - new Vector2(6f, 5.5f), new Vector2(12f, 11f)), fadeTop: 7.2f);
 
         // In front: a leather footstool, and a pile of books to get onto it.
         Round("footstool", Chair + new Vector2(0f, 8.5f), 0f, 2.8f, 3.2f, new Color(0.3f, 0.06f, 0.04f), sphere: false);
-        var bookTints = new[] { Colors.White, new Color(0.85f, 0.8f, 0.75f), new Color(0.75f, 0.85f, 0.75f) };
+        var bookTints = new[] { Color.White, new Color(0.85f, 0.8f, 0.75f), new Color(0.75f, 0.85f, 0.75f) };
         Stack(Chair + new Vector2(0f, 13.5f), new Vector2(6f, 4f), 1.6f, "book_red", bookTints, 0);
 
         // Behind the chair, towers of old books climb to the desk.
@@ -108,37 +81,32 @@ public sealed class Study : Level
 
         // Brass reading lamp by the armchair.
         CircleObstacle(new Vector2(-26f, -38f), 1.2f, 16f);
-        if (Visual)
-        {
-            var brass = Materials.Plastic(new Color(0.8f, 0.6f, 0.3f), 0.25f);
-            brass.Metallic = 1f;
-            Add(new CylinderMesh { TopRadius = 0.25f, BottomRadius = 0.25f, Height = 15f }, new Vector3(-26f, 7.5f, -38f), brass);
-            Add(new CylinderMesh { TopRadius = 1.6f, BottomRadius = 1.6f, Height = 0.4f }, new Vector3(-26f, 0.2f, -38f), brass);
-            Add(new CylinderMesh { TopRadius = 1.4f, BottomRadius = 3f, Height = 3f, CapTop = false, CapBottom = false },
-                new Vector3(-26f, 15.5f, -38f), Materials.Glow(new Color(1f, 0.8f, 0.5f), 0.8f));
-        }
+        var brass = new Look(new Color(0.8f, 0.6f, 0.3f), 0.25f, Metallic: 1f);
+        Primitive(Shape.Cylinder, new Vector3(-26f, 0f, -38f), new Vector3(0.5f, 15f, 0.5f), brass);
+        Primitive(Shape.Cylinder, new Vector3(-26f, 0f, -38f), new Vector3(3.2f, 0.4f, 3.2f), brass);
+        Primitive(Shape.Cylinder, new Vector3(-26f, 14f, -38f), new Vector3(6f, 3f, 6f), new Look(new Color(1f, 0.8f, 0.5f), Glow: 0.8f),
+            topScale: 1.4f / 3f, castShadows: false); // lamp shade
     }
 
-    public override void Atmosphere(Godot.Environment environment, DirectionalLight3D sun, Node3D root)
+    // Evening: little daylight, warm lamps, dust hanging in the air.
+    public override Atmosphere Atmosphere => new()
     {
-        // Evening: little daylight, warm lamps, dust hanging in the air.
-        if (environment.Sky.SkyMaterial is ProceduralSkyMaterial sky)
-        {
-            sky.SkyTopColor = new Color(0.1f, 0.07f, 0.05f);
-            sky.SkyHorizonColor = new Color(0.25f, 0.15f, 0.08f);
-            sky.GroundHorizonColor = new Color(0.25f, 0.15f, 0.08f);
-            sky.GroundBottomColor = new Color(0.05f, 0.03f, 0.02f);
-        }
-        environment.AmbientLightEnergy = 0.35f;
-        environment.VolumetricFogEnabled = true;
-        environment.VolumetricFogDensity = 0.008f;
-        environment.VolumetricFogAlbedo = new Color(0.95f, 0.8f, 0.6f);
-        sun.LightEnergy = 0.45f;
-        sun.LightColor = new Color(1f, 0.75f, 0.5f);
-        sun.RotationDegrees = new Vector3(-35f, 60f, 0f);
+        SkyTop = new Color(0.1f, 0.07f, 0.05f),
+        SkyHorizon = new Color(0.25f, 0.15f, 0.08f),
+        GroundHorizon = new Color(0.25f, 0.15f, 0.08f),
+        GroundBottom = new Color(0.05f, 0.03f, 0.02f),
+        AmbientEnergy = 0.35f,
+        VolumetricFogDensity = 0.008f,
+        VolumetricFogAlbedo = new Color(0.95f, 0.8f, 0.6f),
+        SunEnergy = 0.45f,
+        SunColor = new Color(1f, 0.75f, 0.5f),
+        SunRotationDegrees = new Vector3(-35f, 60f, 0f),
+    };
 
-        Light(root, new Vector3(-26f, 14f, -38f), new Color(1f, 0.78f, 0.5f), 6f, 40f, shadows: true);      // reading lamp
-        Light(root, new Vector3(11f, DeskTop + 4.6f, -36f), new Color(1f, 0.6f, 0.3f), 3f, 25f, shadows: true, flicker: true); // candle
-        Light(root, new Vector3(0f, 38f, 0f), new Color(1f, 0.85f, 0.65f), 3f, 90f);                        // chandelier
+    private void Lights()
+    {
+        Light(new Vector3(-26f, 14f, -38f), new Color(1f, 0.78f, 0.5f), 6f, 40f, shadows: true);                // reading lamp
+        Light(new Vector3(11f, DeskTop + 4.6f, -36f), new Color(1f, 0.6f, 0.3f), 3f, 25f, shadows: true, flicker: true); // candle
+        Light(new Vector3(0f, 38f, 0f), new Color(1f, 0.85f, 0.65f), 3f, 90f);                                    // chandelier
     }
 }

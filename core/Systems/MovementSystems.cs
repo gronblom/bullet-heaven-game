@@ -1,11 +1,12 @@
 using System;
 using Arch.Core;
 using BulletHeaven.Ecs;
-using Godot;
+using BulletHeaven.Numerics;
 
 namespace BulletHeaven.Systems;
 
-/// <summary>Reads the input map into the player's Runner or Car component.</summary>
+/// <summary>Copies this frame's <see cref="GameState.Input"/> (filled in by the engine front-end) into the
+/// player's Runner or Car component.</summary>
 public sealed class PlayerInputSystem(World world, GameState state) : GameSystem(world, state)
 {
     private static readonly QueryDescription CarQuery = new QueryDescription().WithAll<PlayerTag, Car>();
@@ -13,27 +14,19 @@ public sealed class PlayerInputSystem(World world, GameState state) : GameSystem
 
     public override void Update(float dt)
     {
-        // Screen up is -Y on the ground plane, so the vector maps straight onto it.
-        var move = Input.GetVector(GameInput.SteerLeft, GameInput.SteerRight, GameInput.MoveUp, GameInput.MoveDown);
-        bool jumpPressed = Input.IsActionJustPressed(GameInput.RunnerJump);
-        bool jumpHeld = Input.IsActionPressed(GameInput.RunnerJump);
+        var input = State.Input;
         World.Query(in RunnerQuery, (ref Runner runner) =>
         {
-            runner.Move = move;
-            runner.JumpPressed = jumpPressed;
-            runner.JumpHeld = jumpHeld;
+            runner.Move = input.Move;
+            runner.JumpPressed = input.JumpPressed;
+            runner.JumpHeld = input.JumpHeld;
         });
-
-        float throttle = Input.GetActionStrength(GameInput.Accelerate) - Input.GetActionStrength(GameInput.Brake);
-        float steer = Input.GetAxis(GameInput.SteerLeft, GameInput.SteerRight);
-        bool handbrake = Input.IsActionPressed(GameInput.Handbrake);
-        bool jump = Input.IsActionJustPressed(GameInput.Jump);
         World.Query(in CarQuery, (ref Car car) =>
         {
-            car.Throttle = throttle;
-            car.Steer = steer;
-            car.Handbrake = handbrake;
-            car.Jump = jump;
+            car.Throttle = input.Throttle;
+            car.Steer = input.Steer;
+            car.Handbrake = input.Handbrake;
+            car.Jump = input.CarJump;
         });
     }
 }

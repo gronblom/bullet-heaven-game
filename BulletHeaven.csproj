@@ -6,7 +6,9 @@
     <LangVersion>12</LangVersion>
   </PropertyGroup>
   <ItemGroup>
-    <!-- Arch: high-performance archetype ECS. Holds all gameplay state. -->
-    <PackageReference Include="Arch" Version="2.1.0" />
+    <!-- All gameplay (Arch ECS, systems, levels) lives in the shared, engine-independent core. -->
+    <ProjectReference Include="core/BulletHeaven.Core.csproj" />
+    <!-- Other projects in this folder: not part of the Godot assembly. -->
+    <Compile Remove="core/**;tests/**;unity/**" />
   </ItemGroup>
 </Project>
