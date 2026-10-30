@@ -1,8 +1,8 @@
 # Bullet Heaven: Unity version
 
-The same game as the Godot project in the repository root, on Unity 6 + URP. Both share all of the
-gameplay: the Arch ECS components and systems, the levels and the tests live in `../core`
-(engine-independent C#), and the models in `../assets`. This project only draws and controls it.
+The game, on Unity 6 + URP. The gameplay (Arch ECS components and systems, levels) lives in
+`../core` as engine-independent C# (also run headless by `../tests`); the models in `../assets`.
+This project draws and controls it.
 
 ## First time
 
@@ -36,21 +36,19 @@ the core, the second compiles against it.
 
 ## Controls
 
-Same as the Godot version: WASD / arrows / left stick to run, Space / A to jump (hold while falling to
-glide with the parachute), Esc / P / Start to pause, 1-3 or arrows + Enter (stick + A) in menus,
-Shift + 1-3 to add a weapon, F1-F3 to switch level, R to restart.
+See the main README. Tab opens the module screen; Shift + 1-4 gives you a random module (debug).
 
-## How it maps
+## Scripts
 
-| Godot | Unity |
+| File | What |
 |---|---|
-| `src/Main.cs` | `Scripts/GameRunner.cs` (creates itself on Play) |
-| `src/Rendering/LevelView.cs` | `Scripts/LevelView.cs` (+ the occlusion fader) |
-| `src/Rendering/RunnerView.cs`, `LightningRenderer.cs` | `Scripts/RunnerView.cs`, `Scripts/LightningView.cs` |
-| `InstancedRenderer` (MultiMesh) | `Scripts/InstancedBatch.cs` (`Graphics.RenderMeshInstanced`) |
-| `shaders/bug_walk.gdshader` | `Resources/Shaders/Lit.shader` with the `_BUGWALK` keyword |
-| `shaders/puddle.gdshader` | `Resources/Shaders/Puddle.shader` |
-| `Hud.cs`, `Overlay.cs` | `Scripts/GameUi.cs` (IMGUI) |
+| `GameRunner.cs` | creates itself on Play: world, systems, camera, post-processing, drawing |
+| `Effects.cs` | arcade layer: bullet streaks, laser beams, ring fronts, void halos, sparks (from `GameState.Events`) |
+| `GameUi.cs`, `ModuleScreen.cs`, `UiKit.cs` | HUD, level-up / pause cards, module screen (IMGUI) |
+| `LevelView.cs` | builds a level's `LevelLayout`, occlusion fading |
+| `ModelLibrary.cs`, `Looks.cs` | glTF models via glTFast, materials |
+| `RunnerView.cs`, `LightningView.cs`, `InstancedBatch.cs` | the hero, lightning arcs, instanced drawing |
+| `Resources/Shaders/` | `Lit` (glTF textures, matte, dithered fade, bug walk cycle), `Glow` (effects), `Puddle`, `Additive` |
 
 Coordinates: the core's ground plane (x, y) with height h is Unity (x, h, -y), so the world isn't
 mirrored (Unity is left-handed). glTFast imports models mirrored on X, which `ModelLibrary` undoes with a

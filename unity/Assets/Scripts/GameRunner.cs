@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using Arch.Core;
 using BulletHeaven.Ecs;
@@ -7,33 +6,36 @@ using BulletHeaven.Systems;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
+using CoreModules = BulletHeaven.Systems.Modules;
 using CoreTerrain = BulletHeaven.Ecs.Terrain;
 
 namespace BulletHeaven.Unity
 {
     /// <summary>
-    /// Unity front-end for the shared gameplay core, the counterpart of the Godot project's Main.
-    /// It builds the level and the ECS world, fills in the controls, runs the systems in Main's
-    /// order and draws the result (instanced bugs and projectiles, the runner, the level). Menus and
-    /// the HUD are in <see cref="GameUi"/>. It creates itself in whatever scene is open: just press Play.
+    /// The game: builds the level and the ECS world (gameplay lives in the shared core), fills in the
+    /// controls, runs the systems in order and draws the result: instanced bugs, the runner, the level,
+    /// and the arcade effects layer (<see cref="Effects"/>). Menus, the HUD and the module screen are in
+    /// <see cref="GameUi"/>. It creates itself in whatever scene is open: just press Play.
     /// </summary>
     public sealed class GameRunner : MonoBehaviour
     {
         /// <summary>Level picked with F1-F3 or reached through a secret exit.</summary>
         private static int _selectedLevel;
-        /// <summary>Weapons carried through a secret exit into the next level (skips the loadout menu once).</summary>
-        private static WeaponKind[] _carriedLoadout;
+        /// <summary>Modules carried through a secret exit into the next level: each weapon's slots, then the inventory.</summary>
+        private static (Module[][] Slots, List<Module> Inventory)? _carried;
 
-        private static readonly Vector3 CameraOffset = new Vector3(0f, 32f, -18f); // Godot's (0, 32, 18), z flipped
+        private static readonly Vector3 CameraOffset = new Vector3(0f, 32f, -18f);
         private static readonly QueryDescription EnemyQuery = new QueryDescription().WithAll<Enemy, Position, Velocity, Radius, Elevation>();
         private static readonly QueryDescription BulletQuery = new QueryDescription().WithAll<Bullet, Position, Velocity>();
         private static readonly QueryDescription GemQuery = new QueryDescription().WithAll<XpGem, Position>();
         private static readonly QueryDescription OrbQuery = new QueryDescription().WithAll<LightningOrb, Position>();
-        private static readonly QueryDescription ShellQuery = new QueryDescription().WithAll<Shell, Position>();
+        private static readonly QueryDescription VoidQuery = new QueryDescription().WithAll<VoidOrb, Position>();
+        private static readonly QueryDescription RingQuery = new QueryDescription().WithAll<PulseRing, Position>();
         private static readonly QueryDescription BlastQuery = new QueryDescription().WithAll<Blast, Position>();
         private static readonly QueryDescription PuddleQuery = new QueryDescription().WithAll<Puddle, Position>();
         private static readonly QueryDescription PickupQuery = new QueryDescription().WithAll<Pickup, Position>();
-    private static readonly QueryDescription PuffQuery = new QueryDescription().WithAll<SprayPuff, Position>();
+        private static readonly QueryDescription DropQuery = new QueryDescription().WithAll<ModuleDrop, Position>();
+        private static readonly QueryDescription TurretQuery = new QueryDescription().WithAll<Turret, Position>();
 
         private World _world;
         private GameState _state;
@@ -44,16 +46,16 @@ namespace BulletHeaven.Unity
         private OcclusionFader _fader;
         private Camera _camera;
         private Light _sun;
-        private Volume _volume;
         private DepthOfField _depthOfField;
         private Material _sky;
         private Vector3 _cameraTarget;
         private GameUi _ui;
-        private InstancedBatch _ants, _beetles, _bullets, _gems, _orbs, _shells, _blasts, _puddles, _puffs;
+        private Effects _effects;
+        private InstancedBatch _ants, _beetles, _queens, _gems, _voidCores, _puddles, _chips, _plates, _turrets;
         private LightningView _lightning;
         private readonly List<Vector3> _orbPositions = new List<Vector3>();
-        private readonly Dictionary<Entity, Transform> _pickupViews = new Dictionary<Entity, Transform>();
-        private bool _choosing; // a loadout or level-up menu is open (pause can't close it)
+        private readonly Dictionary<Entity, Transform> _parachutes = new Dictionary<Entity, Transform>();
+        private bool _choosing; // a level-up menu is open (pause can't close it)
 
         public GameState State => _state;
         public Level Level => _level;
@@ -78,6 +80,7 @@ namespace BulletHeaven.Unity
             BuildCameraAndLight();
             _ui = gameObject.AddComponent<GameUi>();
             _ui.Runner = this;
+            _effects = new Effects();
             Begin(_selectedLevel);
         }
 
@@ -109,16 +112,18 @@ namespace BulletHeaven.Unity
 
             var start = _level.PlayerStart;
             _state.Player = _world.Create(
-                new PlayerTag(), new Position(start), new Velocity(), new Health(100f),
+                new PlayerTag(), new Position(start), new Velocity(), new Health(100f), new Armor { Current = 50f, Max = 50f },
                 new Elevation { Grounded = true }, new Radius(0.35f),
                 new Runner { Facing = -Mathf.PI / 2f }, RunnerStats.Default);
             _runner = RunnerView.Create(_root);
 
             BuildBatches();
             _lightning = new LightningView(_root);
-            _pickupViews.Clear();
+            _parachutes.Clear();
             _world.Query(in PickupQuery, (Entity entity, ref Pickup pickup, ref Position at) =>
             {
+                if (pickup.Kind != PickupKind.Parachute)
+                    return;
                 var view = ModelLibrary.LoadProp("parachute");
                 if (view == null)
                 {
@@ -126,10 +131,11 @@ namespace BulletHeaven.Unity
                     view.transform.localScale = new Vector3(1.8f, 0.9f, 1.8f);
                 }
                 view.transform.SetParent(_root, false);
-                _pickupViews[entity] = view.transform;
+                _parachutes[entity] = view.transform;
             });
 
-            // Order matters (same as the Godot Main): input -> physics -> collisions -> spatial index -> combat -> cleanup.
+            // Order matters: input -> physics (steering, then pulls and slows) -> movement and collisions
+            // -> spatial index -> weapons and hits -> deaths and pickups -> spawning.
             _systems = new GameSystem[]
             {
                 new PlayerInputSystem(_world, _state),
@@ -138,7 +144,8 @@ namespace BulletHeaven.Unity
                 new EnemySteeringSystem(_world, _state),
                 new BossSystem(_world, _state),
                 new LiquidSystem(_world, _state),
-                new SpraySystem(_world, _state),
+                new VoidSystem(_world, _state),
+                new PatternMotionSystem(_world, _state),
                 new MovementSystem(_world, _state),
                 new CollisionSystem(_world, _state),
                 new VerticalPhysicsSystem(_world, _state),
@@ -148,26 +155,29 @@ namespace BulletHeaven.Unity
                 new WeaponSystem(_world, _state),
                 new BulletSystem(_world, _state),
                 new LightningOrbSystem(_world, _state),
-                new ShellSystem(_world, _state),
+                new PulseRingSystem(_world, _state),
+                new TurretSystem(_world, _state),
+                new BlastSystem(_world, _state),
                 new EnemyDeathSystem(_world, _state),
                 new PickupSystem(_world, _state),
                 new EnemySpawnSystem(_world, _state),
             };
 
+            if (_carried is { } carried)
+            {
+                for (int w = 0; w < _state.Weapons.Count && w < carried.Slots.Length; w++)
+                {
+                    carried.Slots[w].CopyTo(_state.Weapons[w].Slots, 0);
+                    _state.Weapons[w].Recompute();
+                }
+                _state.Inventory.AddRange(carried.Inventory);
+                _carried = null;
+            }
+
             _cameraTarget = Conv.World(start, 0f);
             _choosing = false;
             _ui.Close();
-            if (_carriedLoadout != null)
-            {
-                foreach (var kind in _carriedLoadout)
-                    Arsenal.Grant(_world, kind);
-                _carriedLoadout = null;
-                StartRun();
-            }
-            else
-            {
-                ChooseLoadout();
-            }
+            _state.ShowMessage($"{_level.Name}\nWASD / stick to run, Space / A to jump, Tab: modules\nEsc / Start: pause   F1-F3: switch level", 5f);
         }
 
         private void Teardown()
@@ -185,50 +195,34 @@ namespace BulletHeaven.Unity
             Begin(levelIndex);
         }
 
-        private void StartRun() =>
-            _state.ShowMessage($"{_level.Name}\nWASD / arrows / stick to run, Space / A to jump\nEsc / Start: pause   F1-F3: switch level", 5f);
-
-        /// <summary>Run start: pick two of the four weapons, one card at a time.</summary>
-        private void ChooseLoadout()
-        {
-            _choosing = true;
-            var kinds = new List<WeaponKind>(Cards.Loadout);
-            void Offer(string title)
-            {
-                _ui.ShowCards(title, "1-4 / click / stick + A", Cards.Weapons(kinds), i =>
-                {
-                    Arsenal.Grant(_world, kinds[i]);
-                    kinds.RemoveAt(i);
-                    if (Arsenal.Carried(_world).Count < Cards.LoadoutPicks)
-                    {
-                        Offer("PICK YOUR SECOND WEAPON");
-                        return;
-                    }
-                    _choosing = false;
-                    StartRun();
-                });
-            }
-            Offer("PICK YOUR FIRST WEAPON");
-        }
-
-        /// <summary>Level-up: pause and offer three modifiers.</summary>
-        private void ChooseModifier()
+        /// <summary>Level-up: pause and offer three modules. A weapon module goes to the inventory and the
+        /// module screen opens on it, so you can slot it right away.</summary>
+        private void ChooseModule()
         {
             _state.PendingLevelUps--;
-            var offers = Modifiers.Roll(_world, _state, 3);
-            if (offers.Count == 0)
-            {
-                ref var health = ref _world.Get<Health>(_state.Player);
-                health.Current = health.Max; // everything maxed: have a heal instead
-                _state.ShowMessage($"LEVEL {_state.Level}: fully healed");
-                return;
-            }
+            var offers = CoreModules.Roll(_state, 3);
             _choosing = true;
-            var cards = offers.ConvertAll(m => Cards.Modifier(_state, m));
-            _ui.ShowCards($"LEVEL {_state.Level}", "Pick one: 1-3 / click / stick + A", cards, i =>
+            _ui.ShowCards($"LEVEL {_state.Level}", "Pick one: 1-3 / click / stick + A", Cards.Modules(offers), i =>
             {
-                Modifiers.Pick(_world, _state, offers[i]);
                 _choosing = false;
+                var module = offers[i];
+                if (module.Op == ModuleOp.Player)
+                {
+                    CoreModules.Take(_world, _state, module, autoFit: false);
+                    _state.ShowMessage(module.Name, 1.5f);
+                }
+                else if (CoreModules.Take(_world, _state, module, autoFit: false))
+                {
+                    _ui.Modules.Open(highlight: _state.Inventory.Count - 1);
+                }
+                else if (CoreModules.AutoFit(_state, module))
+                {
+                    _state.ShowMessage($"{module.Name}: slotted (inventory full)", 2f);
+                }
+                else
+                {
+                    _state.ShowMessage("Inventory full and no free slot: make room with Tab", 2.5f);
+                }
             });
         }
 
@@ -248,12 +242,12 @@ namespace BulletHeaven.Unity
             });
         }
 
-        /// <summary>Through the secret exit: remember it's unlocked and carry on with the same weapons.</summary>
+        /// <summary>Through the secret exit: remember it's unlocked and carry on with the same modules.</summary>
         private void TakeExit()
         {
             PlayerPrefs.SetInt("unlocked." + Level.All[_level.ExitTo].Name, 1);
             PlayerPrefs.Save();
-            _carriedLoadout = Arsenal.Carried(_world).ConvertAll(w => w.Kind).ToArray();
+            _carried = (_state.Weapons.ConvertAll(w => (Module[])w.Slots.Clone()).ToArray(), new List<Module>(_state.Inventory));
             Restart(_level.ExitTo);
         }
 
@@ -273,6 +267,8 @@ namespace BulletHeaven.Unity
             }
 
             bool pause = Input.GetKeyDown(KeyCode.Escape) || Input.GetKeyDown(KeyCode.P) || Input.GetKeyDown(KeyCode.JoystickButton7);
+            bool modules = Input.GetKeyDown(KeyCode.Tab) || Input.GetKeyDown(KeyCode.I) || Input.GetKeyDown(KeyCode.JoystickButton6);
+            bool simulate = false;
             if (_state.GameOver)
             {
                 if (Input.GetKeyDown(KeyCode.R) || pause)
@@ -285,9 +281,16 @@ namespace BulletHeaven.Unity
             {
                 TogglePause();
             }
+            else if (modules && !_ui.CardsOpen)
+            {
+                if (_ui.Modules.IsOpen)
+                    _ui.Modules.Close();
+                else
+                    _ui.Modules.Open();
+            }
             else if (!_ui.IsOpen && _state.PendingLevelUps > 0)
             {
-                ChooseModifier();
+                ChooseModule();
             }
             else if (!_ui.IsOpen && _state.ReachedExit)
             {
@@ -296,8 +299,14 @@ namespace BulletHeaven.Unity
             }
             else if (!_ui.IsOpen)
             {
-                DebugWeaponKeys();
+                simulate = true;
+            }
+
+            if (simulate)
+            {
+                DebugKeys();
                 ReadInput();
+                _state.BeginFrame();
                 _state.Time += dt;
                 foreach (var system in _systems)
                     system.Update(dt);
@@ -305,7 +314,7 @@ namespace BulletHeaven.Unity
             }
 
             if (_world != null)
-                SyncVisuals(dt);
+                SyncVisuals(simulate ? dt : 0f);
         }
 
         /// <summary>Legacy input manager to the engine-independent controls (screen up = -Y on the ground plane).</summary>
@@ -314,25 +323,28 @@ namespace BulletHeaven.Unity
             var move = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical"));
             if (move.sqrMagnitude > 1f)
                 move.Normalize();
-            bool jumpPressed = Input.GetButtonDown("Jump") || Input.GetKeyDown(KeyCode.JoystickButton0);
-            bool jumpHeld = Input.GetButton("Jump") || Input.GetKey(KeyCode.JoystickButton0);
             _state.Input = new PlayerInput
             {
                 Move = new BulletHeaven.Numerics.Vector2(move.x, -move.y),
-                JumpPressed = jumpPressed,
-                JumpHeld = jumpHeld,
+                JumpPressed = Input.GetButtonDown("Jump") || Input.GetKeyDown(KeyCode.JoystickButton0),
+                JumpHeld = Input.GetButton("Jump") || Input.GetKey(KeyCode.JoystickButton0),
             };
         }
 
-        /// <summary>Shift + 1-3 adds a weapon, for trying them out.</summary>
-        private void DebugWeaponKeys()
+        /// <summary>Shift + 1-5: a random module of each kind into the inventory (development).</summary>
+        private void DebugKeys()
         {
             if (!Input.GetKey(KeyCode.LeftShift) && !Input.GetKey(KeyCode.RightShift))
                 return;
-            for (int i = 0; i < 3; i++)
+            for (int i = 0; i < 4; i++)
             {
-                if (Input.GetKeyDown(KeyCode.Alpha1 + i))
-                    _state.ShowMessage(Arsenal.Grant(_world, (WeaponKind)i), 1.5f);
+                if (!Input.GetKeyDown(KeyCode.Alpha1 + i))
+                    continue;
+                var op = (ModuleOp)i;
+                var choices = System.Array.FindAll(CoreModules.All, m => m.Op == op);
+                var module = choices[Random.Range(0, choices.Length)];
+                CoreModules.Take(_world, _state, module, autoFit: false);
+                _state.ShowMessage($"Debug: {module.Name}", 1.2f);
             }
         }
 
@@ -344,10 +356,9 @@ namespace BulletHeaven.Unity
             var elevation = _world.Get<Elevation>(player);
             var health = _world.Get<Health>(player);
             var runner = _world.Get<Runner>(player);
-            var weapons = Arsenal.Carried(_world);
-            float minigunSpin = weapons.Find(w => w.Kind == WeaponKind.Minigun).Spin; // default (0) if not carried
+            float minigunSpin = _state.Weapon(WeaponKind.Minigun)?.Spin ?? 0f;
 
-            _runner.ShowWeapons(weapons);
+            _runner.ShowWeapons(_state.Weapons);
             _runner.Sync(position, velocity, runner, elevation, health, minigunSpin, dt);
             _runner.SyncParachute(runner.Gliding, dt);
 
@@ -364,13 +375,19 @@ namespace BulletHeaven.Unity
             var playerPoint = Conv.World(position.Value, elevation.Height + 0.5f);
             _fader.Update(_camera.transform.position, playerPoint, dt);
 
-            DrawBugs();
+            _effects.Begin(_camera, _state.Time);
+            int bugs = DrawBugs();
             DrawProjectiles(dt);
             DrawWorldItems();
-            _ui.EnemyCount = _ants.Count + _beetles.Count;
-            _ui.Speed = velocity.Value.Length();
+            var facing = new BulletHeaven.Numerics.Vector2(Mathf.Cos(runner.Facing), Mathf.Sin(runner.Facing));
+            var gun = Conv.World(position.Value + facing * 0.5f, elevation.Height + 0.75f);
+            if (dt > 0f)
+                _effects.Play(_state.Events, gun);
+            _effects.End(dt);
+
+            _ui.EnemyCount = bugs;
             _ui.Health = health;
-            _ui.Weapons = weapons;
+            _ui.Armor = _world.Get<Armor>(player);
         }
 
         // --- drawing -------------------------------------------------------------------------------
@@ -379,18 +396,20 @@ namespace BulletHeaven.Unity
         {
             _ants = BugBatch(ModelLibrary.Ant, new Color(0.45f, 0.08f, 0.05f));
             _beetles = BugBatch(ModelLibrary.Beetle, new Color(0.35f, 0.15f, 0.06f));
-            _bullets = new InstancedBatch(Meshes.Sphere, Looks.Glow(new Color(1f, 0.75f, 0.3f), 4f), castShadows: false);
+            _queens = BugBatch(ModelLibrary.Ant, new Color(0.45f, 0.08f, 0.05f));
             // Amber sugar crystals: the model's own baked colours and warm inner glow.
             var gem = ModelLibrary.LoadMesh(ModelLibrary.Gem);
             _gems = gem != null ? new InstancedBatch(gem.Mesh, gem.Materials, gem.Fit, castShadows: false)
                 : new InstancedBatch(Meshes.Cube, Looks.Glow(new Color(1f, 0.6f, 0.2f), 1.2f), castShadows: false);
-            _orbs = new InstancedBatch(Meshes.Sphere, Looks.Glow(new Color(0.55f, 0.85f, 1f), 6f), castShadows: false);
-            _shells = new InstancedBatch(Meshes.Sphere, Looks.Plastic(new Color(0.45f, 0.3f, 0.12f), 0.6f));
-            _blasts = new InstancedBatch(Meshes.Sphere, Looks.Additive(Color.white), castShadows: false, data0: "_Color");
+            // Void orbs: a pitch-black core (the glow halo is an effect).
+            _voidCores = new InstancedBatch(Meshes.Sphere, Looks.Plastic(new Color(0.02f, 0.0f, 0.04f), 0.15f), castShadows: false);
             var puddle = new Material(Shader.Find("BulletHeaven/Puddle")) { enableInstancing = true };
             _puddles = new InstancedBatch(Meshes.Plane, puddle, castShadows: false, data0: "_Color", data1: "_Params");
-            var mist = new Material(Shader.Find("BulletHeaven/Mist")) { enableInstancing = true };
-            _puffs = new InstancedBatch(Meshes.Sphere, mist, castShadows: false, data0: "_Color");
+            _chips = new InstancedBatch(Meshes.Cube, Looks.Plastic(new Color(0.12f, 0.1f, 0.1f), 0.25f, 0.6f));
+            _plates = new InstancedBatch(Meshes.Cube, Looks.Plastic(new Color(0.5f, 0.55f, 0.62f), 0.3f, 0.9f));
+            var mortar = ModelLibrary.LoadMesh(new ModelSpec("mortar", 2.2f, 0f));
+            _turrets = mortar != null ? new InstancedBatch(mortar.Mesh, mortar.Materials, mortar.Fit)
+                : new InstancedBatch(Meshes.Cylinder(), Looks.Plastic(new Color(0.3f, 0.35f, 0.18f), 0.5f, 0.4f));
         }
 
         /// <summary>The bug model through the walk-cycle shader, or a coloured blob if it isn't generated.</summary>
@@ -408,14 +427,15 @@ namespace BulletHeaven.Unity
             return new InstancedBatch(model.Mesh, model.Materials, model.Fit, data0: "_Anim");
         }
 
-        private void DrawBugs()
+        private int DrawBugs()
         {
             _ants.Begin();
             _beetles.Begin();
+            _queens.Begin();
             _world.Query(in EnemyQuery, (ref Enemy enemy, ref Position p, ref Velocity v, ref Radius r, ref Elevation e) =>
             {
                 var heading = v.Value.LengthSquared() > 0.01f ? v.Value.Normalized() : BulletHeaven.Numerics.Vector2.Right;
-                var batch = enemy.Kind == EnemyKind.Beetle ? _beetles : _ants;
+                var batch = enemy.Kind switch { EnemyKind.Beetle => _beetles, EnemyKind.Queen => _queens, _ => _ants };
                 float radius = r.Value;
                 var at = Conv.World(p.Value, e.Height);
 
@@ -436,64 +456,70 @@ namespace BulletHeaven.Unity
             });
             _ants.Draw();
             _beetles.Draw();
+            _queens.Draw();
+            return _ants.Count + _beetles.Count + _queens.Count;
         }
 
         private void DrawProjectiles(float dt)
         {
             var terrain = _state.Terrain;
             float time = _state.Time;
+            var fx = _effects;
 
-            _bullets.Begin();
+            // Minigun rounds: glowing streaks.
+            var bulletColor = Effects.WeaponColor(WeaponKind.Minigun);
             _world.Query(in BulletQuery, (ref Bullet b, ref Position p, ref Velocity v) =>
-                _bullets.Add(Conv.World(p.Value, b.Height), Quaternion.Euler(0f, Conv.Heading(v.Value), 0f), new Vector3(0.9f, 0.12f, 0.12f)));
-            _bullets.Draw();
+                fx.Bullet(Conv.World(p.Value, b.Height), new Vector3(v.Value.X, 0f, -v.Value.Y), bulletColor));
+
+            foreach (var beam in _state.Lasers)
+                fx.Laser(beam.From.ToUnity(), beam.To.ToUnity(), beam.Width);
 
             _gems.Begin();
             _world.Query(in GemQuery, (ref Position p) =>
                 _gems.Add(Conv.World(p.Value, terrain.GroundHeight(p.Value) + 0.35f), Quaternion.Euler(0f, (time * 3f + p.Value.X) * Mathf.Rad2Deg, 0f), Vector3.one * 0.3f));
             _gems.Draw();
 
+            // Arcane wand orbs: blue-white balls of light (with real lights, see LightningView).
             _orbPositions.Clear();
-            _orbs.Begin();
+            var orbs = _orbPositions;
             _world.Query(in OrbQuery, (ref LightningOrb orb, ref Position p) =>
             {
                 var at = Conv.World(p.Value, orb.Height + Mathf.Sin(time * 4f + p.Value.X) * 0.15f);
-                float size = 0.64f + Mathf.Sin(time * 23f + p.Value.Y * 3f) * 0.1f;
-                _orbs.Add(at, Quaternion.identity, Vector3.one * size);
-                _orbPositions.Add(at);
+                float size = 0.9f + Mathf.Sin(time * 23f + p.Value.Y * 3f) * 0.15f;
+                fx.Dot(at, size * 2.2f, new Color(0.35f, 0.65f, 1f, 0.7f));
+                fx.Dot(at, size, new Color(0.9f, 0.97f, 1f, 1f));
+                orbs.Add(at);
             });
-            _orbs.Draw();
             _lightning.Update(_state.Arcs, _orbPositions, _camera.transform.position, time, dt);
 
-            _shells.Begin();
-            _world.Query(in ShellQuery, (ref Shell s, ref Position p) =>
-                _shells.Add(Conv.World(p.Value, s.Height), Quaternion.Euler(0f, 0f, s.Flight * 12f * Mathf.Rad2Deg), new Vector3(0.64f, 0.48f, 0.48f)));
-            _shells.Draw();
+            // Void orbs: black core, violet halo, motes sucked in.
+            _voidCores.Begin();
+            var cores = _voidCores;
+            _world.Query(in VoidQuery, (ref VoidOrb orb, ref Position p) =>
+            {
+                var at = Conv.World(p.Value, orb.Height);
+                float grow = Mathf.Clamp01(orb.Age * 4f);
+                cores.Add(at, Quaternion.identity, Vector3.one * orb.CoreRadius * 0.9f * grow);
+                fx.VoidOrb(at, orb.PullRadius, orb.CoreRadius * grow);
+            });
+            _voidCores.Draw();
 
-            _blasts.Begin();
+            // TD Mortar rings: burning fronts.
+            _world.Query(in RingQuery, (ref PulseRing ring, ref Position p) => fx.Ring(p.Value, ring));
+
+            // Implosion flashes.
             _world.Query(in BlastQuery, (ref Blast b, ref Position p) =>
             {
-                float t = b.Age / ShellSystem.BlastDuration;
-                float size = b.Radius * (0.4f + 0.8f * t) * 2f;
-                _blasts.Add(Conv.World(p.Value, b.Height + 0.3f), Quaternion.identity, new Vector3(size, size * 0.6f, size),
-                    new Vector4(1f, 0.6f - 0.3f * t, 0.2f, 0.8f * (1f - t)));
+                float t = b.Age / BlastSystem.Duration;
+                fx.Dot(Conv.World(p.Value, b.Height + 0.6f), b.Radius * 2.2f * (0.5f + t), new Color(0.75f, 0.45f, 1f, 0.8f * (1f - t)));
             });
-            _blasts.Draw();
-
-            // Bug spray: pale, slightly green mist that swells and thins out.
-            _puffs.Begin();
-            _world.Query(in PuffQuery, (ref SprayPuff puff, ref Position p) =>
-            {
-                float t = puff.Age / puff.Lifetime;
-                float alpha = 0.35f * Mathf.Min(1f, t * 6f) * (1f - t);
-                _puffs.Add(Conv.World(p.Value, puff.Height), Quaternion.identity, Vector3.one * puff.Radius * 2f,
-                    new Vector4(0.85f, 0.95f, 0.8f, alpha));
-            });
-            _puffs.Draw();
         }
 
         private void DrawWorldItems()
         {
+            float time = _state.Time;
+            var fx = _effects;
+
             _puddles.Begin();
             _world.Query(in PuddleQuery, (ref Puddle puddle, ref Position p) =>
             {
@@ -508,8 +534,56 @@ namespace BulletHeaven.Unity
             });
             _puddles.Draw();
 
-            // Items bob and turn until picked up.
-            foreach (var pair in _pickupViews)
+            // Dropped modules: spinning chips glowing in their kind's colour (blinking before they vanish).
+            _chips.Begin();
+            var chips = _chips;
+            _world.Query(in DropQuery, (ref ModuleDrop drop, ref Position p) =>
+            {
+                if (drop.Age > ItemSystem.DropLifetime - 5f && Mathf.Repeat(time * 6f, 1f) < 0.4f)
+                    return;
+                var at = Conv.World(p.Value, drop.Height + 0.55f + Mathf.Sin(time * 3f + p.Value.X) * 0.12f);
+                chips.Add(at, Quaternion.Euler(20f, time * 120f + p.Value.X * 40f, 0f), new Vector3(0.55f, 0.12f, 0.55f));
+                var accent = Cards.Accent(CoreModules.Get(drop.Module).Op).ToUnity();
+                fx.Dot(at, 1.6f, new Color(accent.r, accent.g, accent.b, 0.65f));
+            });
+            _chips.Draw();
+
+            // Armour plates and turret kits lying around; the parachute keeps its own model.
+            _plates.Begin();
+            var plates = _plates;
+            _world.Query(in PickupQuery, (ref Pickup pickup, ref Position p) =>
+            {
+                if (pickup.Kind == PickupKind.Parachute)
+                    return;
+                var at = Conv.World(p.Value, pickup.Height + 0.5f + Mathf.Sin(time * 2.5f) * 0.1f);
+                var spin = Quaternion.Euler(0f, time * 90f, 0f);
+                if (pickup.Kind == PickupKind.ArmorPlate)
+                {
+                    plates.Add(at, spin, new Vector3(0.7f, 0.18f, 0.5f));
+                    fx.Dot(at, 1.5f, new Color(0.35f, 0.65f, 1f, 0.6f));
+                }
+                else
+                {
+                    plates.Add(at, spin, new Vector3(0.45f, 0.45f, 0.45f));
+                    fx.Dot(at, 1.5f, new Color(1f, 0.45f, 0.12f, 0.6f));
+                }
+            });
+            _plates.Draw();
+
+            // Turrets: a big mortar on the spot, blinking in its last seconds, a glowing base ring.
+            _turrets.Begin();
+            var turrets = _turrets;
+            _world.Query(in TurretQuery, (ref Turret turret, ref Position p) =>
+            {
+                if (turret.Lifetime < 4f && Mathf.Repeat(time * 5f, 1f) < 0.3f)
+                    return;
+                var at = Conv.World(p.Value, turret.Height);
+                turrets.Add(at, Quaternion.Euler(0f, time * 30f, 0f), Vector3.one);
+                fx.Dot(at + Vector3.up * 0.2f, 3.2f, new Color(1f, 0.45f, 0.12f, 0.35f));
+            });
+            _turrets.Draw();
+
+            foreach (var pair in _parachutes)
             {
                 if (!_world.IsAlive(pair.Key))
                 {
@@ -518,8 +592,8 @@ namespace BulletHeaven.Unity
                 }
                 var pickup = _world.Get<Pickup>(pair.Key);
                 var at = _world.Get<Position>(pair.Key).Value;
-                pair.Value.localPosition = Conv.World(at, pickup.Height + 0.3f + Mathf.Sin(_state.Time * 2f) * 0.2f);
-                pair.Value.localRotation = Quaternion.Euler(0f, _state.Time * Mathf.Rad2Deg, 0f);
+                pair.Value.localPosition = Conv.World(at, pickup.Height + 0.3f + Mathf.Sin(time * 2f) * 0.2f);
+                pair.Value.localRotation = Quaternion.Euler(0f, time * Mathf.Rad2Deg, 0f);
             }
         }
 
@@ -527,7 +601,7 @@ namespace BulletHeaven.Unity
 
         /// <summary>
         /// Narrow field of view plus near/far depth of field = the tilt-shift miniature look; ACES tone
-        /// mapping, bloom and a little extra saturation like the Godot version.
+        /// mapping, strong bloom for the arcade effects, and a little extra saturation.
         /// </summary>
         private void BuildCameraAndLight()
         {
@@ -558,8 +632,9 @@ namespace BulletHeaven.Unity
             var tonemapping = profile.Add<Tonemapping>(true);
             tonemapping.mode.Override(TonemappingMode.ACES);
             var bloom = profile.Add<Bloom>(true);
-            bloom.intensity.Override(0.4f);
+            bloom.intensity.Override(0.9f);
             bloom.threshold.Override(1f);
+            bloom.scatter.Override(0.75f);
             var color = profile.Add<ColorAdjustments>(true);
             color.saturation.Override(15f);
             color.contrast.Override(5f);
@@ -571,9 +646,9 @@ namespace BulletHeaven.Unity
 
             var volumeObject = new GameObject("Post-processing");
             volumeObject.transform.SetParent(transform, false);
-            _volume = volumeObject.AddComponent<Volume>();
-            _volume.isGlobal = true;
-            _volume.sharedProfile = profile;
+            var volume = volumeObject.AddComponent<Volume>();
+            volume.isGlobal = true;
+            volume.sharedProfile = profile;
         }
     }
 }

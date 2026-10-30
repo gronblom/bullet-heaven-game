@@ -6,7 +6,7 @@ using BulletHeaven.Numerics;
 
 namespace BulletHeaven.Systems;
 
-/// <summary>XP gems fly to the car once it gets close, and level-ups queue a modifier choice (shown by Main).</summary>
+/// <summary>XP gems fly to the player once they get close; level-ups queue a module choice (shown by the front-end).</summary>
 public sealed class PickupSystem(World world, GameState state) : GameSystem(world, state)
 {
     private const float PickupRadius = 0.9f;
@@ -58,93 +58,218 @@ public sealed class PickupSystem(World world, GameState state) : GameSystem(worl
     }
 }
 
-/// <summary>One level-up reward: a weapon modifier or a passive, pickable up to <see cref="MaxPicks"/> times.</summary>
-public sealed record Modifier(string Name, string Description, WeaponKind? Weapon, int MaxPicks, Action<World, GameState> Apply);
-
 /// <summary>
-/// The level-up catalogue. No weapon levels: each run starts with two chosen weapons and every
-/// level-up offers three of these to pick from, so a build is a set of choices rather than a grind.
+/// The module catalogue and the inventory rules. Modules come from level-ups (pick one of three) and
+/// from drops; weapon modules go into the inventory and from there into a weapon's slots, where they
+/// change its numbers (+ADD, xMULTIPLY) or its geometry. Player modules apply at once.
 /// </summary>
-public static class Modifiers
+public static class Modules
 {
-    private static Modifier Weapon(WeaponKind kind, string name, string text, int max, Arsenal.SlotChange change) =>
-        new(name, text, kind, max, (world, _) => Arsenal.Modify(world, kind, change));
+    private static Module Add(string name, Stat stat, float value, string text, WeaponKind? only = null) =>
+        new(name, $"+{value:0.#} {Abbrev(stat)}", ModuleOp.Add, stat, value, Geometry.Linear, only, text);
 
-    public static readonly Modifier[] All =
+    private static Module Mul(string name, Stat stat, float value, string text, WeaponKind? only = null) =>
+        new(name, $"x{value:0.#} {Abbrev(stat)}", ModuleOp.Multiply, stat, value, Geometry.Linear, only, text);
+
+    private static Module Shape(string name, Geometry geometry, string text, WeaponKind? only = null) =>
+        new(name, geometry.ToString().ToUpperInvariant(), ModuleOp.Geometry, Stat.Count, 0f, geometry, only, text);
+
+    private static Module You(string name, string shortName, string text, Action<World, GameState> apply) =>
+        new(name, shortName, ModuleOp.Player, Stat.Count, 0f, Geometry.Linear, null, text, apply);
+
+    public static string Abbrev(Stat stat) => stat switch
     {
-        Weapon(WeaponKind.Minigun, "Hollow points", "Minigun +40% damage", 3, (ref WeaponSlot w) => w.Damage++),
-        Weapon(WeaponKind.Minigun, "Spin-up motor", "Minigun fires 25% faster", 3, (ref WeaponSlot w) => w.Rate++),
-        Weapon(WeaponKind.Minigun, "Extra barrel", "One more bullet stream", 2, (ref WeaponSlot w) => w.Count++),
-        Weapon(WeaponKind.Minigun, "Tungsten rounds", "Bullets pierce one more bug", 3, (ref WeaponSlot w) => w.Pierce++),
-        Weapon(WeaponKind.Minigun, "Long barrel", "Minigun range +3", 2, (ref WeaponSlot w) => w.Area++),
+        Stat.Damage => "DMG",
+        Stat.FireRate => "RATE",
+        Stat.Count => "PARTICLES",
+        Stat.Pierce => "PIERCE",
+        Stat.Chain => "CHAIN",
+        Stat.Area => "AREA",
+        Stat.Frequency => "FREQ",
+        Stat.Amplitude => "AMP",
+        _ => "RANGE",
+    };
 
-        Weapon(WeaponKind.LightningWand, "Overcharge", "Zaps +40% damage", 3, (ref WeaponSlot w) => w.Damage++),
-        Weapon(WeaponKind.LightningWand, "Quick incantation", "Orbs come 25% faster", 3, (ref WeaponSlot w) => w.Rate++),
-        Weapon(WeaponKind.LightningWand, "Twin orbs", "One more orb per cast", 2, (ref WeaponSlot w) => w.Count++),
-        Weapon(WeaponKind.LightningWand, "Forked lightning", "Each zap chains to 2 more bugs", 3, (ref WeaponSlot w) => w.Pierce++),
-        Weapon(WeaponKind.LightningWand, "Static field", "Bigger zap radius", 2, (ref WeaponSlot w) => w.Area++),
-        Weapon(WeaponKind.LightningWand, "Long fuse", "Orbs last 2 s longer", 2, (ref WeaponSlot w) => w.Special++),
-
-        Weapon(WeaponKind.SeedMortar, "Heavy seeds", "Mortar +40% damage", 3, (ref WeaponSlot w) => w.Damage++),
-        Weapon(WeaponKind.SeedMortar, "Quick reload", "Mortar fires 25% faster", 3, (ref WeaponSlot w) => w.Rate++),
-        Weapon(WeaponKind.SeedMortar, "Cluster seeds", "One more shell per volley", 3, (ref WeaponSlot w) => w.Count++),
-        Weapon(WeaponKind.SeedMortar, "Big bang", "Bigger blasts", 3, (ref WeaponSlot w) => w.Area++),
-        Weapon(WeaponKind.SeedMortar, "Sticky jam", "Blasts leave jam that slows bugs", 1, (ref WeaponSlot w) => w.Special++),
-
-        Weapon(WeaponKind.BugSpray, "Industrial strength", "Spray poison +40%", 3, (ref WeaponSlot w) => w.Damage++),
-        Weapon(WeaponKind.BugSpray, "Rapid pump", "Sprays 25% faster", 3, (ref WeaponSlot w) => w.Rate++),
-        Weapon(WeaponKind.BugSpray, "Wide nozzle", "More mist in a wider cone", 2, (ref WeaponSlot w) => w.Count++),
-        Weapon(WeaponKind.BugSpray, "Pressure boost", "Reaches further, bigger clouds", 2, (ref WeaponSlot w) => w.Area++),
-        Weapon(WeaponKind.BugSpray, "Knockdown formula", "Mist pushes bugs back", 2, (ref WeaponSlot w) => w.Pierce++),
-        Weapon(WeaponKind.BugSpray, "Lingering cloud", "Mist hangs around much longer", 1, (ref WeaponSlot w) => w.Special++),
-
-        new("Thick skin", "+25 max health, heal 40", null, 3, (world, state) =>
+    public static readonly Module[] All =
+    {
+        // + ADD: flat additions.
+        Add("+4 Damage", Stat.Damage, 4f, "Flat damage on every hit."),
+        Add("+1 Particle", Stat.Count, 1f, "One more stream, arc, ring or orb per shot."),
+        Add("+2 Pierce", Stat.Pierce, 2f, "Rounds pass through two more bugs.", WeaponKind.Minigun),
+        Add("+1 Chain target", Stat.Chain, 1f, "Every arc jumps to one more bug.", WeaponKind.ArcaneWand),
+        Add("+0.6 Amplitude", Stat.Amplitude, 0.6f, "Wider waves (a in sin(θ + t·f)·a)."),
+        Add("+3 Range", Stat.Range, 3f, "Reaches further."),
+        // x MULTIPLY: scaling.
+        Mul("x1.5 Fire rate", Stat.FireRate, 1.5f, "Fires half again as often."),
+        Mul("x2 Particle count", Stat.Count, 2f, "Doubles the particles of every volley."),
+        Mul("x1.5 Damage", Stat.Damage, 1.5f, "Every hit lands harder."),
+        Mul("x1.5 Frequency", Stat.Frequency, 1.5f, "Faster waves and spirals (f)."),
+        Mul("x1.5 Amplitude", Stat.Amplitude, 1.5f, "Bigger waves (a)."),
+        Mul("x1.4 Area", Stat.Area, 1.4f, "Bigger rings, orbs, arcs and beams."),
+        // Geometry overrides: swap the pattern function.
+        Shape("Geometry: Sine", Geometry.Sine, "Projectiles weave: offset = sin(θ + t·f)·a."),
+        Shape("Geometry: Spiral", Geometry.Spiral, "Rotating arms wind outwards, all around you."),
+        Shape("Geometry: Pentagon", Geometry.Pentagon, "Five-way star volleys; pentagonal fire rings."),
+        Shape("Geometry: Radial", Geometry.Radial, "A burst in every direction."),
+        Shape("Geometry: Laser", Geometry.Laser, "A continuous beam that pierces everything.", WeaponKind.Minigun),
+        // Player modules: apply at once.
+        You("Armor plating", "+30 ARMOR", "Thirty more armour, fully plated.", (world, state) =>
         {
-            ref var health = ref world.Get<Health>(state.Player);
-            health.Max += 25f;
-            health.Current = Math.Min(health.Max, health.Current + 40f);
+            ref var armor = ref world.Get<Armor>(state.Player);
+            armor.Max += 30f;
+            armor.Current = armor.Max;
         }),
-        new("Running shoes", "Run faster", null, 3, (world, state) =>
+        You("Running shoes", "+SPEED", "Run faster.", (world, state) =>
         {
             if (world.Has<RunnerStats>(state.Player))
                 world.Get<RunnerStats>(state.Player).MaxSpeed += 0.8f;
             else
                 world.Get<CarStats>(state.Player).MaxSpeed += 1.5f;
         }),
-        new("Gem magnet", "Pick up gems from further away", null, 3, (_, state) => state.MagnetRadius += 2f),
-        new("Heavy boots", "Stomps hit harder and bounce higher", null, 3, (world, state) =>
+        You("Gem magnet", "+MAGNET", "Pick up crystals from further away.", (_, state) => state.MagnetRadius += 2f),
+        You("Field medic", "+HEAL", "+20 max health, healed in full.", (world, state) =>
         {
-            state.StompDamage *= 1.4f;
-            state.RamDamagePerSpeed *= 1.3f;
-            if (world.Has<RunnerStats>(state.Player))
-                world.Get<RunnerStats>(state.Player).StompBounce += 1f;
+            ref var health = ref world.Get<Health>(state.Player);
+            health.Max += 20f;
+            health.Current = health.Max;
         }),
     };
 
-    public static int Picks(GameState state, Modifier modifier) => state.Passives.GetValueOrDefault(modifier.Name);
+    public static Module Get(int index) => All[index];
+    public static int IndexOf(Module module) => Array.IndexOf(All, module);
 
-    /// <summary>Up to <paramref name="count"/> different modifiers that can still be picked for the weapons carried.</summary>
-    public static List<Modifier> Roll(World world, GameState state, int count)
+    private static int Weight(Module m) => m.Op switch
     {
-        var pool = new List<Modifier>();
+        ModuleOp.Add => 10,
+        ModuleOp.Multiply => 6,
+        ModuleOp.Geometry => 3,
+        _ => 4,
+    };
+
+    /// <summary>A random module index, rarer kinds less often (geometry overrides are the rarest).</summary>
+    public static int RandomIndex(Random rng, bool weaponOnly = false)
+    {
+        int total = 0;
         foreach (var m in All)
+            total += weaponOnly && m.Op == ModuleOp.Player ? 0 : Weight(m);
+        int roll = rng.Next(total);
+        for (int i = 0; i < All.Length; i++)
         {
-            if (Picks(state, m) < m.MaxPicks && (m.Weapon == null || Arsenal.Has(world, m.Weapon.Value)))
-                pool.Add(m);
+            int w = weaponOnly && All[i].Op == ModuleOp.Player ? 0 : Weight(All[i]);
+            if (roll < w)
+                return i;
+            roll -= w;
         }
-        var result = new List<Modifier>();
-        while (result.Count < count && pool.Count > 0)
+        return 0;
+    }
+
+    /// <summary>Up to <paramref name="count"/> different modules for a level-up.</summary>
+    public static List<Module> Roll(GameState state, int count)
+    {
+        var result = new List<Module>();
+        for (int attempt = 0; result.Count < count && attempt < 50; attempt++)
         {
-            int i = state.Rng.Next(pool.Count);
-            result.Add(pool[i]);
-            pool.RemoveAt(i);
+            var m = All[RandomIndex(state.Rng)];
+            if (!result.Contains(m))
+                result.Add(m);
         }
         return result;
     }
 
-    public static void Pick(World world, GameState state, Modifier modifier)
+    /// <summary>
+    /// Takes a module: player modules apply now; weapon modules go into the inventory (or straight
+    /// into a free slot with <paramref name="autoFit"/>). False if the inventory is full.
+    /// </summary>
+    public static bool Take(World world, GameState state, Module module, bool autoFit)
     {
-        modifier.Apply(world, state);
-        state.Passives[modifier.Name] = Picks(state, modifier) + 1;
+        if (module.Op == ModuleOp.Player)
+        {
+            module.ApplyToPlayer?.Invoke(world, state);
+            return true;
+        }
+        if (autoFit && AutoFit(state, module))
+            return true;
+        if (state.Inventory.Count >= GameState.InventorySize)
+            return false;
+        state.Inventory.Add(module);
+        return true;
+    }
+
+    /// <summary>Puts an inventory module into a weapon slot; what was there goes back to the inventory.</summary>
+    public static bool Slot(GameState state, int inventoryIndex, WeaponKind kind, int slot)
+    {
+        if (inventoryIndex < 0 || inventoryIndex >= state.Inventory.Count || slot < 0 || slot >= Weapon.SlotCount)
+            return false;
+        var module = state.Inventory[inventoryIndex];
+        var weapon = state.Weapon(kind);
+        if (!module.Fits(kind))
+            return false;
+        state.Inventory.RemoveAt(inventoryIndex);
+        if (weapon.Slots[slot] is { } previous)
+            state.Inventory.Insert(Math.Min(inventoryIndex, state.Inventory.Count), previous);
+        weapon.Slots[slot] = module;
+        weapon.Recompute();
+        return true;
+    }
+
+    /// <summary>Moves a slotted module back to the inventory (if there is room).</summary>
+    public static bool Unslot(GameState state, WeaponKind kind, int slot)
+    {
+        var weapon = state.Weapon(kind);
+        if (weapon.Slots[slot] is not { } module || state.Inventory.Count >= GameState.InventorySize)
+            return false;
+        weapon.Slots[slot] = null;
+        state.Inventory.Add(module);
+        weapon.Recompute();
+        return true;
+    }
+
+    /// <summary>Moves a module between two slots (same or different weapons), swapping if needed.</summary>
+    public static bool Move(GameState state, WeaponKind fromKind, int fromSlot, WeaponKind toKind, int toSlot)
+    {
+        var from = state.Weapon(fromKind);
+        var to = state.Weapon(toKind);
+        var module = from.Slots[fromSlot];
+        var other = to.Slots[toSlot];
+        if (module == null || !module.Fits(toKind) || (other != null && !other.Fits(fromKind)))
+            return false;
+        to.Slots[toSlot] = module;
+        from.Slots[fromSlot] = other;
+        from.Recompute();
+        to.Recompute();
+        return true;
+    }
+
+    /// <summary>Slots a module into the first free fitting slot, preferring its own weapon and emptier weapons.</summary>
+    public static bool AutoFit(GameState state, Module module)
+    {
+        Weapon best = null;
+        int bestFree = 0;
+        foreach (var weapon in state.Weapons)
+        {
+            if (!module.Fits(weapon.Kind))
+                continue;
+            int free = Array.FindAll(weapon.Slots, m => m == null).Length;
+            if (free > bestFree)
+            {
+                best = weapon;
+                bestFree = free;
+            }
+        }
+        if (best == null)
+            return false;
+        best.Slots[Array.IndexOf(best.Slots, null)] = module;
+        best.Recompute();
+        return true;
+    }
+
+    /// <summary>Slots everything in the inventory that fits somewhere.</summary>
+    public static void AutoFitInventory(GameState state)
+    {
+        for (int i = state.Inventory.Count - 1; i >= 0; i--)
+        {
+            if (AutoFit(state, state.Inventory[i]))
+                state.Inventory.RemoveAt(i);
+        }
     }
 }

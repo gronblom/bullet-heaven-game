@@ -1,117 +1,68 @@
-# Bullet Heaven (working title)
+# Bullet Heaven
 
-A 3D bullet heaven at bug's-eye scale: a tiny guy runs around a giant kitchen while endless swarms
-of bugs pour in. Climb stools and toy blocks onto the counter, jump off it onto the swarm, stomp
-bugs Mario-style and let the auto-gun do the rest. Built with **Godot 4.7 (.NET / C#)** and the
-**[Arch](https://github.com/genaray/Arch) ECS**. A Micro Machines-style toy car is still in as an
-alternative player.
+A 3D bullet-heaven in a miniature world: a tiny hero against swarms of ants and beetles on kitchen
+counters, in a dusty study and out on the windowsill. Unity 6 (URP), gameplay in a plain C# ECS
+library (Arch) that also runs headless for tests.
 
 ## Getting started
 
-1. Install the **.NET SDK 8** or newer: https://dotnet.microsoft.com/download
-2. Download **Godot 4.7 – .NET** (the C# edition, *not* the standard one): https://godotengine.org/download
-   - To check whether you already have it: open Godot; the project manager title shows the version,
-     and the .NET edition says ".NET" / "mono" in its name.
-3. In Godot's project manager: **Import** → pick this folder's `project.godot` → open it.
-4. Press **F5** (or the ▶ button). The first run builds the C# project and restores NuGet packages.
-
-You can also compile without the editor: `dotnet build`.
-
-## Unity version
-
-There is also a Unity 6 (URP) version of the same game in `unity/`; see `unity/README.md`. Both
-front-ends share the gameplay in `core/` (engine-independent C#: the Arch ECS components and systems,
-the levels, small maths types) and the models in `assets/`.
-
-Gameplay checks run without any engine: `dotnet run --project tests` builds the real levels headless and
-plays them with bots (climbing routes, the parachute glide, puddles, weapons, modifiers, the boss, a
-1,500-bug stress test).
+See `unity/README.md`: install the .NET 8 SDK, add the `unity` folder in Unity Hub, open it with
+Unity 6, press Play.
 
 ## Controls
 
-| Action | Keyboard | Gamepad |
+| Action | Keyboard / mouse | Gamepad |
 |---|---|---|
 | Run | WASD / arrows | Left stick |
-| Jump (hold for higher) | Space | A or Y |
-| Glide (with the parachute): hold jump while falling | Space | A or Y |
+| Jump (hold for higher; hold while falling to glide with the parachute) | Space | A |
+| Module screen | Tab / I | Back |
 | Pause | Esc / P | Start |
-| Pick a card (weapon, modifier, pause menu) | 1-4, or arrows + Enter, or click | D-pad + A |
-| Add a weapon (debug) | Shift + 1 / 2 / 3 / 4 | |
+| Pick a card | 1-3, arrows + Enter, or click | Stick + A |
 | Switch level (debug) | F1 / F2 / F3 | |
+| Debug: a random ADD / MULTIPLY / GEOMETRY / player module | Shift + 1 / 2 / 3 / 4 | |
 | Restart after getting squashed | R | Start |
 
-**Playing as the car instead:** select the `Main` node in `scenes/main.tscn` and tick **Drive Car**
-in the Inspector. Car controls: W/S or RT/LT to drive and brake, A/D or the stick to steer,
-Shift/Ctrl or B to drift, Space or Y to jump.
+## Weapons: arithmetic, not grinding
+
+Every run starts with the same **four weapons**, all firing automatically:
+
+| Weapon | Default | What modules scale best |
+|---|---|---|
+| **Arcane Wand** | lightning arcs that jump from bug to bug | `+ Chain`, `+ Damage` |
+| **Minigun** | a dense stream of fast rounds | `x Fire rate`, `x Particle count`, `+ Pierce` |
+| **TD Mortar** | rings of fire pulsing out around you | frequency / amplitude, `x Area` |
+| **Void Pulser** | slow plasma orbs that drag bugs in and implode | geometry (pentagon, spiral, radial) |
+
+They grow through **arithmetic modules**, four slots per weapon:
+
+- **+ ADD**: flat additions (`+4 Damage`, `+2 Pierce`, `+1 Chain target`, `+1 Particle`, ...)
+- **x MULTIPLY**: scaling (`x1.5 Fire rate`, `x2 Particle count`, `x1.5 Frequency`, `x1.4 Area`, ...)
+- **GEOMETRY**: swaps the pattern function: **Sine** (projectiles weave: `offset = sin(θ + t·f)·a`),
+  **Spiral** (rotating arms winding outwards), **Pentagon** (five-way stars, pentagonal fire rings),
+  **Radial** (bursts all around), and for the minigun only, **Laser** (a continuous piercing beam).
+
+A weapon's numbers are always: base, then every ADD, then every MULTIPLY, then the last geometry
+override. The module screen shows each weapon's stats and the equation it is running.
+
+**Getting modules**: every level-up offers three cards (some modules apply to you at once: armour
+plating, running shoes, gem magnet, field medic). Bugs drop modules too (beetles often, the queen
+always), plus **armour plates** (armour soaks damage before health) and **turret kits**: a turret
+locks down the spot and pulses rings with your TD Mortar's current equations for 30 s.
+Press **Tab** to drag modules from the inventory into slots.
 
 ## Levels
 
-Switch any time with **F1-F3** (or set `Start Level` on the `Main` node in the Inspector).
+| Key | Level | The way up |
+|---|---|---|
+| F1 | **Kitchen**: daylight, oak floor, butcher-block counter | stools + cutting board, or the toy-block staircase, to the counter (10) |
+| F2 | **The Study**: wood panelling, Chesterfield armchair, golden idol, candle and lamp light | books -> footstool -> seat -> armrest -> chair back -> book towers -> desk (13) |
+| F3 | **The Windowsill** (secret, boss): flower pots, a leaky watering can, the garden far below | an arena for the **Queen Ant** |
 
-| Key | Level | Mood | The way up |
-|---|---|---|---|
-| F1 | **Kitchen** | daylight, oak floor, butcher-block counter | stools + cutting board, or the toy-block staircase, to the counter (10) |
-| F2 | **The Study** | Indiana Jones: wood panelling, Persian rug, Chesterfield armchair, golden idol, globe, chest, candle and lamp light in dusty air | books -> footstool -> seat -> armrest -> chair back -> book towers -> desk (13) |
-| F3 | **The Windowsill** (secret, boss) | outdoors on the painted sill: flower pots, a leaky watering can, the garden far below | seed trays (3.2); mostly an open arena for the **Queen Ant** |
+**The secret**: on the kitchen counter, climb the rulers onto the books, hop onto the toaster and
+grab the **parachute**. Jump off the back of the toaster holding jump to glide to the back cabinets
+and into the open window: that unlocks the Windowsill, and your modules come with you.
 
-**The secret way to the Windowsill:** on the kitchen counter, climb the ruler ramps onto the books,
-hop onto the **toaster** and grab the **parachute** (MDK style). Then jump off the toaster's back
-edge towards the window and **hold jump** to glide over to the back cabinets, which you can't reach
-any other way, and into the open window. That unlocks the Windowsill (remembered in
-`user://progress.cfg`) and takes you there with your weapons. F3 jumps straight there while developing.
-
-**The Queen Ant** appears 12 s in: a huge ant (2,500 HP, boss bar at the top) that calls in a ring
-of ants every 7 s and every 10 s rears up for a moment and then charges in a straight line.
-
-**Spilled liquids** slow down everyone wading through them, player and bugs alike: water (70 %
-speed), coffee (60 %), juice (50 %), jam (35 %), honey (30 %). The kitchen has coffee and honey on
-the counter and water and juice on the floor; the study has tea, jam and honey; the sill has water
-from the watering can. They're drawn with `shaders/puddle.gdshader` (a wobbly blob outline, ripples
-on thin liquids and a surface-tension bulge on thick ones, glossy so the room reflects in them).
-
-Every climbing route, the parachute glide (and that it falls short without one), the puddle slow,
-the modifiers and the boss fight are checked headless against the real level collision.
-Each level is one class in `src/Levels/` built from the helpers in `Level.cs`.
-
-## Gameplay so far
-
-- **The kitchen** (level 1): the floor is the main arena. The counter in the middle (10 up) is high ground
-  with mugs, books, a toaster, a cereal box, an apple and a pencil on it.
-  - **Ways up**: a cutting board leaning on a stool (then jump to the counter), or the toy-block
-    staircase (one jump per block). Ramps on the counter launch you, one of them right off the edge.
-  - **Ways down**: anywhere. A long fall ends in a **shockwave** that flattens bugs around you.
-  - Tall things in front of the camera turn **see-through** so you never lose the player.
-- **Runner**: push a direction and it runs that way. Jumps have a short input buffer, coyote time
-  and variable height. **Land on a bug to stomp it** and bounce off: chain stomps across a swarm.
-- **Bugs climb**: they run straight at you and scale any wall in the way, so camping on the
-  counter just means watching ants pour over the edge. They drop off edges to follow you down.
-- **Weapons, chosen not grinded**: at the start of a run you pick **two of the four** (all fire
-  automatically):
-  - **Minigun**: a hose of tracer rounds at the nearest bug on your level; spinning barrels.
-  - **Ball-lightning wand**: slow glowing orbs that drift into the swarm and chain-zap several
-    bugs at once, lighting up everything around them.
-  - **Seed mortar**: lobs seeds at random bugs in range, even onto the counter from the floor,
-    that burst on landing.
-  - **Bug spray**: a short cone of insecticide mist towards the nearest bug; every puff poisons and
-    slows the bugs inside it as it drifts out and swells.
-- **Modifiers**: every level-up pauses the game and offers **three modifiers to pick one from**, for
-  the weapons you carry (Hollow points, Extra barrel, Tungsten rounds, Twin orbs, Forked
-  lightning, Static field, Cluster seeds, Big bang, Sticky jam that leaves slowing jam where seeds
-  burst, Wide nozzle, Knockdown formula, Lingering cloud, ...) or yourself (Thick skin, Running shoes, Gem magnet, Heavy boots). Each has a pick
-  limit; the HUD lists what each weapon has. The catalogue is `Modifiers.All` in
-  `src/Systems/ProgressionSystems.cs`, the numbers are in `WeaponStats`.
-- **Bugs walk**: legs step in a tripod gait and antennae feel around (animated in a shader, so
-  a thousand of them stay cheap); they turn nose-up to climb walls and tip over as they fall.
-- **Fruit** (Pikmin-style, glossy and detailed): apple, strawberry and cherries on the counter,
-  an orange and a banana on the floor. All solid and climbable.
-- **Enemies**: ants, plus tanky, slow-climbing beetles after 45 s; spawn rate ramps up and a swarm
-  arrives every 30 s.
-- **XP gems** with magnet pickup.
-- **Pause** any time with Esc / Start (resume, restart, back to the kitchen).
-- **Look**: baked PBR models and textures, oak floorboards, narrow FOV + near/far depth of field
-  (tilt-shift), soft sun shadows, real-time global illumination (SDFGI), SSAO, screen-space
-  reflections, AgX tone mapping. If it runs slowly on your GPU, turn off `SdfgiEnabled` in
-  `Main.BuildEnvironment` first.
+**Spilled liquids** slow everyone wading through them: water, coffee, juice, jam, honey.
 
 ## 3D models
 
@@ -119,7 +70,7 @@ All models are generated by a Blender script and committed in `assets/models/` (
 textures in `assets/textures/`), so they work straight after `git pull`. Each model gets a
 detailed procedural material (wood grain, glazed ceramic, marble, brushed steel, insect chitin,
 knitted fabric, ...) that is baked into ordinary textures (colour, roughness, metallic, normal,
-emission), because only plain textures survive the export to Godot.
+emission), because only plain textures survive the glTF export.
 
 **Regenerate or tweak them** (Blender 4.x or 5.x), from the repository root:
 
@@ -139,8 +90,8 @@ of the script: shapes plus a material recipe.
 |---|---|
 | `runner.glb` | the hero: realistic proportions, brown leather bomber jacket over a white tee, jeans and boots (separate `LegL/LegR/ArmL/ArmR` parts so the run cycle still animates) |
 | `ant.glb`, `beetle.glb` | enemies (an `anim` vertex colour tags legs and antennae for the walk shader) |
-| `minigun.glb`, `wand.glb`, `spray_can.glb` | weapons in the runner's hands (the minigun's `Barrels` part spins) |
-| `mortar.glb` | the seed mortar (menu icon) |
+| `minigun.glb`, `wand.glb` | weapons in the runner's hands (the minigun's `Barrels` part spins) |
+| `mortar.glb`, `void_pulser.glb` | TD Mortar (also the deployed turrets) and Void Pulser |
 | `icons/*.png` | menu-card icons, rendered with `--icons` (transparent 256 px) |
 | `strawberry.glb`, `orange.glb`, `banana.glb`, `cherries.glb` | fruit |
 | `gem.glb` | XP crystals (amber sugar crystals) |
@@ -150,7 +101,7 @@ of the script: shapes plus a material recipe.
 | `ruler.glb`, `eraser.glb`, `toaster.glb` | ramps and the toaster on the counter |
 | `parachute.glb` | the parachute pickup and the canopy shown while gliding |
 | `ball.glb`, `dog_bowl.glb` | floor props |
-| `textures/floor_*.jpg` | oak floorboards (a seamless 16 x 16 patch; `shaders/floor.gdshader` hides the repeat) |
+| `textures/floor_*.jpg` | oak floorboards (a seamless 16 x 16 patch) |
 | `armchair`, `footstool`, `desk`, `idol`, `globe`, `chest`, `urn`, `candle`, `panel_wall`, `rug`, `book_red`, `book_green`, `textures/floor_walnut_*` | The Study |
 | `window_frame`, `pot_cactus`, `pot_basil`, `watering_can`, `textures/floor_sill_*` | The Windowsill |
 
@@ -158,45 +109,26 @@ of the script: shapes plus a material recipe.
 name and replace the file. Bugs, the runner and gems are auto-fitted (scaled, centred, stood on the
 ground). Props are expected at in-game size with the origin at the bottom centre; box-like props
 (books, cereal box, pencil, blocks, counter, cutting board) are stretched to their exact size.
-Characters should face glTF's usual +Z; if one runs sideways, change its `YawDegrees` in
-`src/Rendering/ModelLibrary.cs`. Delete a file and the game falls back to simple shapes.
+Characters should face glTF's usual +Z; if one runs sideways, change its yaw in
+`unity/Assets/Scripts/ModelLibrary.cs`. Delete a file and the game falls back to simple shapes.
 Keep bugs low-poly (a few thousand triangles): there can be over a thousand on screen.
 
 ## Architecture
 
 ```
-core/                  Shared, engine-independent gameplay (netstandard2.1, used by Godot and Unity)
-  Ecs/                 Components, GameState, SpatialGrid, Terrain (ground height + walls)
-  Systems/             One class per behaviour, run in a fixed order by the front-end
+core/                  Gameplay, engine-independent (netstandard2.1)
+  Ecs/                 Components, GameState, Weapons (modules, stats, pattern engine), SpatialGrid, Terrain
+  Systems/             One class per behaviour (weapons, rings, void orbs, turrets, loot, boss, ...)
   Levels/              Level base class + Kitchen, Study, Windowsill; LevelLayout = visuals as data
-  Numerics/            Vector2/Vector3/Rect2/Mathf/Color with Godot's names and behaviour
-tests/                 Headless gameplay checks: dotnet run --project tests
-src/                   Godot front-end
-  Main.cs              Creates the ECS world, fills in input, runs systems, syncs visuals
-  GameInput.cs         Input actions registered in code
-  Hud.cs, Overlay.cs   HUD and card menus
-  Rendering/           LevelView (layout -> nodes), MultiMesh batches, runner/car views, models, fading
-unity/                 Unity front-end (see unity/README.md)
+  Numerics/            Vector2/Vector3/Rect2/Mathf/Color
+tests/                 Headless checks: dotnet run --project tests
+unity/                 The game (see unity/README.md)
+assets/                Generated models, textures and icons (copied into Unity by its setup script)
 tools/blender/         generate_models.py: builds and bakes every model
 ```
 
-- **Gameplay is pure ECS.** Godot nodes are only used for presentation. Horizontal movement runs
-  on the ground plane as `Vector2 (x, y)` → world `(x, 0, y)`; height is a separate `Elevation`
-  component driven by gravity and `Terrain.GroundHeight`. Props are walls only for things below
-  their top that can't step up onto them; bugs climb walls instead. The level is a height map
-  (no overhangs), so stools and the counter are solid blocks.
-- **Rendering of crowds uses `MultiMesh`.** Enemies, bullets and gems are uploaded as one float
-  buffer per frame, so thousands of entities cost a few draw calls.
-- **Structural changes** (create/destroy) never happen inside a query: destroys go through
-  `GameState.Destroy`, spawns are collected and created after the query.
-- Measured headless: 1,500 bugs crowding the player cost about 2.3 ms per frame for all
-  gameplay systems.
-
-## Ideas / next steps
-
-- Pikmin-style follower swarm (followers as weapons)
-- More ways around the kitchen: climbable fridge handles; more items like the parachute that open up
-  hard-to-reach places (a grappling hook, spring shoes)
-- Skid marks, dust particles, screen shake, sound
-- More levels (garden, sandbox, bathtub), loops and gaps to jump
-- More models: fridge, back cabinets, walls, a car model for car mode
+- **Gameplay is pure ECS** in `core/`; Unity only draws it and reads the controls. Horizontal
+  movement runs on a ground plane; height is a separate `Elevation` driven by gravity and the terrain.
+- **Crowds are instanced**: bugs and gems are drawn with `Graphics.RenderMeshInstanced`, the walk cycle
+  in a shader; effects (bullets, beams, ring fronts, sparks) are camera-facing quads in one dynamic mesh.
+- Measured headless: 1,500 bugs cost about 2 ms per frame for all gameplay systems.

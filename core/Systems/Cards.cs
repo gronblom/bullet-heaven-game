@@ -5,53 +5,65 @@ using BulletHeaven.Numerics;
 namespace BulletHeaven.Systems;
 
 /// <summary>
-/// One card in a menu (loadout, level-up, pause), as both front-ends draw it: a title, a small
-/// category line, a description, an icon (assets/icons/{Icon}.png), an accent colour and, for
-/// modifiers, how many times it has been picked out of how many.
+/// One card in a menu (level-up, pause), as both front-ends draw it: a title, a small category line,
+/// a description, an icon (assets/icons/{Icon}.png) and/or a big glyph (+4, x1.5, ~), an accent colour.
 /// </summary>
-public sealed record MenuCard(string Title, string Category, string Text, string Icon, Color Accent, int Picks = 0, int MaxPicks = 0);
+public sealed record MenuCard(string Title, string Category, string Text, string Icon, Color Accent, string Glyph = null);
 
-/// <summary>The cards on offer: the run-start loadout and level-up modifiers.</summary>
+/// <summary>The cards on offer and the colours that identify weapons and module kinds.</summary>
 public static class Cards
 {
-    /// <summary>Every weapon is on offer at the start; pick <see cref="LoadoutPicks"/> of them.</summary>
-    public static readonly WeaponKind[] Loadout = { WeaponKind.Minigun, WeaponKind.LightningWand, WeaponKind.SeedMortar, WeaponKind.BugSpray };
-    public const int LoadoutPicks = 2;
-
     public static Color Accent(WeaponKind kind) => kind switch
     {
-        WeaponKind.Minigun => new Color(1f, 0.55f, 0.15f),
-        WeaponKind.LightningWand => new Color(0.4f, 0.75f, 1f),
-        WeaponKind.SeedMortar => new Color(0.55f, 0.8f, 0.25f),
-        _ => new Color(0.85f, 0.45f, 0.95f),
+        WeaponKind.ArcaneWand => new Color(0.4f, 0.75f, 1f),
+        WeaponKind.Minigun => new Color(1f, 0.6f, 0.2f),
+        WeaponKind.TdMortar => new Color(1f, 0.35f, 0.15f),
+        _ => new Color(0.75f, 0.4f, 1f),
+    };
+
+    public static Color Accent(ModuleOp op) => op switch
+    {
+        ModuleOp.Add => new Color(0.45f, 0.9f, 0.45f),
+        ModuleOp.Multiply => new Color(1f, 0.62f, 0.2f),
+        ModuleOp.Geometry => new Color(0.78f, 0.5f, 1f),
+        _ => new Color(1f, 0.82f, 0.35f),
     };
 
     public static string Icon(WeaponKind kind) => kind switch
     {
+        WeaponKind.ArcaneWand => "wand",
         WeaponKind.Minigun => "minigun",
-        WeaponKind.LightningWand => "wand",
-        WeaponKind.SeedMortar => "mortar",
-        _ => "spray_can",
+        WeaponKind.TdMortar => "mortar",
+        _ => "void_pulser",
     };
 
-    private static readonly Color PassiveAccent = new(1f, 0.8f, 0.35f);
-
-    public static MenuCard Weapon(WeaponKind kind) =>
-        new(WeaponStats.Name(kind), "WEAPON", WeaponStats.Blurb(kind), Icon(kind), Accent(kind));
-
-    public static List<MenuCard> Weapons(IEnumerable<WeaponKind> kinds)
+    /// <summary>The module's arithmetic as a short symbol: +4, x1.5, or a sign for the geometry.</summary>
+    public static string Glyph(Module m) => m.Op switch
     {
-        var cards = new List<MenuCard>();
-        foreach (var kind in kinds)
-            cards.Add(Weapon(kind));
-        return cards;
-    }
+        ModuleOp.Add => $"+{m.Value:0.#}",
+        ModuleOp.Multiply => $"×{m.Value:0.#}",
+        ModuleOp.Geometry => m.Geometry switch
+        {
+            Geometry.Sine => "∿",
+            Geometry.Spiral => "@",
+            Geometry.Pentagon => "✦",
+            Geometry.Radial => "✺",
+            Geometry.Laser => "═",
+            _ => "—",
+        },
+        _ => "♥",
+    };
 
-    public static MenuCard Modifier(GameState state, Modifier modifier) => modifier.Weapon is { } kind
-        ? new(modifier.Name, WeaponStats.Name(kind).ToUpperInvariant(), modifier.Description, Icon(kind), Accent(kind),
-            Modifiers.Picks(state, modifier), modifier.MaxPicks)
-        : new(modifier.Name, "YOU", modifier.Description, modifier.Name == "Gem magnet" ? "gem" : "runner", PassiveAccent,
-            Modifiers.Picks(state, modifier), modifier.MaxPicks);
+    public static string Category(Module m) => m.Op switch
+    {
+        ModuleOp.Player => "YOU",
+        _ => $"{m.Op.ToString().ToUpperInvariant()} · {(m.Only is { } kind ? WeaponBase.Name(kind).ToUpperInvariant() : "ANY WEAPON")}",
+    };
+
+    public static MenuCard Module(Module m) =>
+        new(m.Name, Category(m), m.Text, m.Only is { } kind ? Icon(kind) : null, Accent(m.Op), Glyph(m));
+
+    public static List<MenuCard> Modules(List<Module> modules) => modules.ConvertAll(Module);
 
     public static List<MenuCard> Pause() => new()
     {

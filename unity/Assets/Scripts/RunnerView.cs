@@ -77,23 +77,14 @@ namespace BulletHeaven.Unity
             go.transform.localScale = scale;
         }
 
-        /// <summary>
-        /// Puts the carried weapons in his hands: the minigun prefers the right hand, the wand the left,
-        /// the spray can whichever is free (the mortar has no hand-held model).
-        /// </summary>
-        public void ShowWeapons(List<WeaponSlot> weapons)
+        /// <summary>Puts the hand-held weapons in his hands: the minigun in the right, the arcane wand in the left.</summary>
+        public void ShowWeapons(IEnumerable<Weapon> weapons)
         {
             foreach (var slot in weapons)
             {
                 if (_held.ContainsKey(slot.Kind))
                     continue;
-                int hand = slot.Kind switch
-                {
-                    WeaponKind.Minigun => _inHand[1] == null ? 1 : 0,
-                    WeaponKind.LightningWand => _inHand[0] == null ? 0 : 1,
-                    WeaponKind.BugSpray => _inHand[1] == null ? 1 : 0,
-                    _ => -1,
-                };
+                int hand = slot.Kind switch { WeaponKind.Minigun => 1, WeaponKind.ArcaneWand => 0, _ => -1 };
                 GameObject model = null;
                 if (hand >= 0 && _inHand[hand] == null)
                     model = Hold(Cards.Icon(slot.Kind), hand);

@@ -22,7 +22,9 @@ Sim.Routes(Check);
 Sim.Glide(Check);
 Sim.Puddles(Check);
 Sim.Weapons(Check);
-Sim.Modifiers(Check);
+Sim.Geometries(Check);
+Sim.Modules(Check);
+Sim.Loot(Check);
 Sim.Boss(Check);
 Sim.Stress(Check);
 
@@ -57,16 +59,17 @@ sealed class Sim : IDisposable
         }
         State.Player = World.Create(new PlayerTag(), new Position(start), new Velocity(), new Health(100f),
             new Elevation { Height = State.Terrain.GroundHeight(start), Grounded = true }, new Radius(0.35f),
-            new Runner(), RunnerStats.Default);
+            new Runner(), RunnerStats.Default, new Armor { Current = 50f, Max = 50f });
         _spawner = spawn ? new EnemySpawnSystem(World, State) : null;
         _systems = new GameSystem[]
         {
             new PlayerInputSystem(World, State), new RunnerPhysicsSystem(World, State), new CarPhysicsSystem(World, State),
-            new EnemySteeringSystem(World, State), new BossSystem(World, State), new LiquidSystem(World, State), new SpraySystem(World, State),
-            new MovementSystem(World, State), new CollisionSystem(World, State), new VerticalPhysicsSystem(World, State),
-            new ItemSystem(World, State), new EnemyGridSystem(World, State), new PlayerContactSystem(World, State),
-            new WeaponSystem(World, State), new BulletSystem(World, State), new LightningOrbSystem(World, State),
-            new ShellSystem(World, State), new EnemyDeathSystem(World, State), new PickupSystem(World, State),
+            new EnemySteeringSystem(World, State), new BossSystem(World, State), new LiquidSystem(World, State), new VoidSystem(World, State),
+            new PatternMotionSystem(World, State), new MovementSystem(World, State), new CollisionSystem(World, State),
+            new VerticalPhysicsSystem(World, State), new ItemSystem(World, State), new EnemyGridSystem(World, State),
+            new PlayerContactSystem(World, State), new WeaponSystem(World, State), new BulletSystem(World, State),
+            new LightningOrbSystem(World, State), new PulseRingSystem(World, State), new TurretSystem(World, State),
+            new BlastSystem(World, State), new EnemyDeathSystem(World, State), new PickupSystem(World, State),
         };
     }
 
@@ -76,6 +79,7 @@ sealed class Sim : IDisposable
 
     public void Step(Vector2 move, bool jumpPressed = false, bool jumpHeld = false, bool immortal = false)
     {
+        State.BeginFrame();
         State.Input = new PlayerInput { Move = move, JumpPressed = jumpPressed, JumpHeld = jumpHeld };
         State.Time += Dt;
         foreach (var system in _systems)
@@ -96,13 +100,38 @@ sealed class Sim : IDisposable
         while (State.PendingLevelUps > 0)
         {
             State.PendingLevelUps--;
-            var offers = BulletHeaven.Systems.Modifiers.Roll(World, State, 3);
+            var offers = BulletHeaven.Systems.Modules.Roll(State, 3);
             if (offers.Count == 0)
                 continue;
-            BulletHeaven.Systems.Modifiers.Pick(World, State, offers[rng.Next(offers.Count)]);
+            BulletHeaven.Systems.Modules.Take(World, State, offers[rng.Next(offers.Count)], autoFit: true);
             picked++;
         }
         return picked;
+    }
+
+    /// <summary>Keep only one weapon (the others stay quiet), optionally with modules slotted.</summary>
+    public Weapon Only(WeaponKind kind, params Module[] modules)
+    {
+        State.Weapons.RemoveAll(w => w.Kind != kind);
+        var weapon = State.Weapons[0];
+        for (int i = 0; i < modules.Length; i++)
+            weapon.Slots[i] = modules[i];
+        weapon.Recompute();
+        return weapon;
+    }
+
+    public static Module Find(string name) => System.Array.Find(BulletHeaven.Systems.Modules.All, m => m.Name == name);
+
+    /// <summary>60 ants scattered 4-12 away, then 10 s of fighting; returns kills.</summary>
+    public int Crowd(int seed = 5, float health = 12f)
+    {
+        var rng = new Random(seed);
+        var center = Pos;
+        for (int i = 0; i < 60; i++)
+            Ant(center + Vector2.FromAngle((float)rng.NextDouble() * Mathf.Tau) * (4f + (float)rng.NextDouble() * 8f), health);
+        for (int f = 0; f < 600; f++)
+            Step(Vector2.Zero, immortal: true);
+        return State.Kills;
     }
 
     public Entity Ant(Vector2 at, float health, float speed = 4.5f) => World.Create(new Position(at), new Velocity(), new Radius(0.35f),
@@ -201,68 +230,104 @@ sealed class Sim : IDisposable
 
     public static void Weapons(CheckFn check)
     {
-        foreach (var kind in Cards.Loadout)
+        foreach (WeaponKind kind in System.Enum.GetValues(typeof(WeaponKind)))
         {
             using var sim = new Sim(0, new Vector2(0f, 30f));
-            Arsenal.Grant(sim.World, kind);
-            var rng = new Random(5);
-            for (int i = 0; i < 60; i++)
-                sim.Ant(new Vector2(0f, 30f) + Vector2.FromAngle((float)rng.NextDouble() * Mathf.Tau) * (4f + (float)rng.NextDouble() * 8f), 12f);
-            for (int f = 0; f < 600; f++)
-                sim.Step(Vector2.Zero, immortal: true);
-            check(sim.State.Kills >= 55, $"{WeaponStats.Name(kind)} clears a crowd", $"{sim.State.Kills}/60 in 10 s");
+            sim.Only(kind);
+            int kills = sim.Crowd();
+            check(kills >= 50, $"{WeaponBase.Name(kind)} (base) clears a crowd", $"{kills}/60 in 10 s");
         }
-
-        using var mortar = new Sim(0, new Vector2(0f, 12f));
-        Arsenal.Grant(mortar.World, WeaponKind.SeedMortar);
-        for (int i = 0; i < 10; i++)
-            mortar.World.Get<Elevation>(mortar.Ant(new Vector2(-5 + i, 0f), 25f, speed: 0f)).Height = 10f;
-        for (int f = 0; f < 600; f++)
-            mortar.Step(Vector2.Zero, immortal: true);
-        check(mortar.State.Kills >= 5, "Mortar hits bugs up on the counter", $"{mortar.State.Kills}/10");
+        using var all = new Sim(0, new Vector2(0f, 30f));
+        int together = all.Crowd(health: 40f);
+        check(together >= 55, "All four together vs tougher ants", $"{together}/60 in 10 s");
     }
 
-    public static void Modifiers(CheckFn check)
+    public static void Geometries(CheckFn check)
+    {
+        var shapes = new[] { "Geometry: Sine", "Geometry: Spiral", "Geometry: Pentagon", "Geometry: Radial" };
+        foreach (WeaponKind kind in System.Enum.GetValues(typeof(WeaponKind)))
+        {
+            var results = new List<string>();
+            int worst = 60;
+            foreach (var shape in shapes)
+            {
+                using var sim = new Sim(0, new Vector2(0f, 30f));
+                sim.Only(kind, Find(shape));
+                int kills = sim.Crowd();
+                worst = Math.Min(worst, kills);
+                results.Add($"{shape.Substring(10)} {kills}");
+            }
+            check(worst >= 30, $"{WeaponBase.Name(kind)}: every geometry works", string.Join(", ", results));
+        }
+        using var laser = new Sim(0, new Vector2(0f, 30f));
+        laser.Only(WeaponKind.Minigun, Find("Geometry: Laser"));
+        int beamKills = laser.Crowd();
+        check(beamKills >= 50 && laser.State.Lasers.Count > 0 || beamKills >= 58, "Minigun laser beam", $"{beamKills}/60");
+    }
+
+    public static void Modules(CheckFn check)
+    {
+        // Arithmetic order: base 6, +4 then x1.5 => 15, whichever slot each sits in.
+        using var sim = new Sim(0, new Vector2(0f, 30f));
+        var gun = sim.Only(WeaponKind.Minigun, Find("x1.5 Damage"), Find("+4 Damage"));
+        check(MathF.Abs(gun.Stats.Damage - 15f) < 0.01f, "ADD before MULTIPLY: (6 + 4) x 1.5", $"{gun.Stats.Damage}");
+        gun.Slots[2] = Find("x2 Particle count");
+        gun.Slots[3] = Find("+1 Particle");
+        gun.Recompute();
+        check(gun.Stats.Particles == 4, "Particles: (1 + 1) x 2 = 4", $"{gun.Stats.Particles}");
+
+        // Inventory: slot, swap back, limits; modules that don't fit are refused.
+        using var inv = new Sim(0, new Vector2(0f, 30f));
+        var st = inv.State;
+        BulletHeaven.Systems.Modules.Take(inv.World, st, Find("+2 Pierce"), autoFit: false);
+        BulletHeaven.Systems.Modules.Take(inv.World, st, Find("+4 Damage"), autoFit: false);
+        bool refused = !BulletHeaven.Systems.Modules.Slot(st, 0, WeaponKind.ArcaneWand, 0); // pierce is minigun-only
+        bool slotted = BulletHeaven.Systems.Modules.Slot(st, 0, WeaponKind.Minigun, 0);
+        bool swapped = BulletHeaven.Systems.Modules.Slot(st, 0, WeaponKind.Minigun, 0) && st.Inventory[0].Name == "+2 Pierce";
+        float armorBefore = inv.World.Get<Armor>(st.Player).Max;
+        BulletHeaven.Systems.Modules.Take(inv.World, st, Find("Armor plating"), autoFit: false);
+        check(refused && slotted && swapped && inv.World.Get<Armor>(st.Player).Max == armorBefore + 30f,
+            "Slot / swap / fit rules; player modules apply at once", $"inventory: {string.Join(", ", st.Inventory.ConvertAll(m => m.Name))}");
+
+        // Level-ups over a whole run with auto-fit never break the limits.
+        var rng = new Random(1);
+        int picks = 0;
+        for (int i = 0; i < 60; i++)
+            if (BulletHeaven.Systems.Modules.Take(inv.World, st, BulletHeaven.Systems.Modules.Roll(st, 3)[rng.Next(3)], autoFit: true))
+                picks++;
+        bool full = st.Weapons.TrueForAll(w => System.Array.TrueForAll(w.Slots, m => m == null || m.Fits(w.Kind)));
+        check(full && st.Inventory.Count <= GameState.InventorySize, "60 level-ups: modules fit their weapons, inventory capped",
+            $"{picks} taken, inventory {st.Inventory.Count}");
+    }
+
+    public static void Loot(CheckFn check)
     {
         using var sim = new Sim(0, new Vector2(0f, 30f));
-        Arsenal.Grant(sim.World, WeaponKind.Minigun);
-        Arsenal.Grant(sim.World, WeaponKind.SeedMortar);
-        var rng = new Random(1);
-        bool wrongWeapon = false, duplicate = false;
-        int picks = 0;
-        for (int i = 0; i < 100; i++)
-        {
-            var offers = BulletHeaven.Systems.Modifiers.Roll(sim.World, sim.State, 3);
-            if (offers.Count == 0)
-                break;
-            wrongWeapon |= offers.Any(m => m.Weapon == WeaponKind.LightningWand);
-            duplicate |= offers.Select(m => m.Name).Distinct().Count() != offers.Count;
-            BulletHeaven.Systems.Modifiers.Pick(sim.World, sim.State, offers[rng.Next(offers.Count)]);
-            picks++;
-        }
-        bool overLimit = BulletHeaven.Systems.Modifiers.All.Any(m => BulletHeaven.Systems.Modifiers.Picks(sim.State, m) > m.MaxPicks);
-        check(!wrongWeapon && !duplicate && !overLimit, "Modifiers: carried weapons only, within limits", $"{picks} picks until exhausted");
+        sim.Only(WeaponKind.TdMortar);
+        sim.State.Weapons[0].Timer = 999f; // the turret does the work
+        var at = sim.Pos + new Vector2(0.5f, 0f);
+        sim.World.Create(new Position(at), new ModuleDrop { Module = 0, Height = 0f });
+        sim.World.Create(new Position(at), new Pickup { Kind = PickupKind.TurretKit, Height = 0f });
+        sim.World.Get<Armor>(sim.State.Player).Current = 10f;
+        sim.World.Create(new Position(at), new Pickup { Kind = PickupKind.ArmorPlate, Height = 0f });
+        sim.Step(Vector2.Zero, immortal: true);
+        bool picked = sim.State.Inventory.Count == 1 && sim.World.Get<Armor>(sim.State.Player).Current == 35f;
+        int kills = sim.Crowd();
+        check(picked && kills >= 30, "Pickups: module to inventory, armour plate, turret pulses", $"inventory {sim.State.Inventory.Count}, turret kills {kills}/60");
 
-        // Sticky jam: mortar blasts leave temporary puddles.
-        for (int i = 0; i < 20; i++)
-            sim.Ant(new Vector2(-5f + i * 0.5f, 22f), 12f);
-        var puddles = new QueryDescription().WithAll<Puddle>();
-        int jam = 0;
-        for (int f = 0; f < 60 * 4; f++)
-        {
-            sim.Step(Vector2.Zero, immortal: true);
-            int n = 0;
-            sim.World.Query(in puddles, (ref Puddle p) => { if (p.Lifetime > 0f) n++; });
-            jam = Math.Max(jam, n);
-        }
-        check(jam > 0, "Sticky jam modifier spills jam", $"up to {jam} at once");
+        // Armour soaks contact damage before health.
+        using var hit = new Sim(0, new Vector2(0f, 30f));
+        hit.State.Weapons.Clear();
+        hit.Ant(hit.Pos + new Vector2(0.3f, 0f), 1000f);
+        for (int f = 0; f < 5; f++)
+            hit.Step(Vector2.Zero);
+        var armor = hit.World.Get<Armor>(hit.State.Player);
+        check(armor.Current < 50f && hit.World.Get<Health>(hit.State.Player).Current == 100f, "Armour soaks damage first", $"armour {armor.Current}");
     }
 
     public static void Boss(CheckFn check)
     {
         using var sim = new Sim(2, Level.All[2].PlayerStart, spawn: true);
-        Arsenal.Grant(sim.World, WeaponKind.Minigun);
-        Arsenal.Grant(sim.World, WeaponKind.SeedMortar);
         var rng = new Random(2);
         var move = Vector2.Zero;
         int charges = 0;
@@ -288,7 +353,7 @@ sealed class Sim : IDisposable
     public static void Stress(CheckFn check)
     {
         using var sim = new Sim(0, new Vector2(0f, 12f));
-        Arsenal.Grant(sim.World, WeaponKind.Minigun);
+        sim.Only(WeaponKind.Minigun);
         var rng = new Random(1);
         for (int i = 0; i < 1500; i++)
             sim.Ant(new Vector2(rng.Next(-75, 75), rng.Next(-50, 50)), 1e6f);

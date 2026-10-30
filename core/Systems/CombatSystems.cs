@@ -76,7 +76,16 @@ public sealed class PlayerContactSystem(World world, GameState state) : GameSyst
             }
             else if (health.Invulnerable <= 0f)
             {
-                health.Current -= enemy.ContactDamage;
+                // Armour plating soaks damage first.
+                float damage = enemy.ContactDamage;
+                if (World.Has<Armor>(player))
+                {
+                    ref var armor = ref World.Get<Armor>(player);
+                    float absorbed = MathF.Min(armor.Current, damage);
+                    armor.Current -= absorbed;
+                    damage -= absorbed;
+                }
+                health.Current -= damage;
                 health.Invulnerable = 0.6f;
                 enemy.Knockback = direction * 8f;
             }
@@ -143,7 +152,7 @@ public sealed class BulletSystem(World world, GameState state) : GameSystem(worl
             foreach (int i in _hits)
             {
                 var target = grid.Entities[i];
-                if (target == bullet.LastHit || MathF.Abs(grid.Heights[i] + 0.5f - bullet.Height) > WeaponStats.MaxHeightDifference)
+                if (target == bullet.LastHit || MathF.Abs(grid.Heights[i] + 0.5f - bullet.Height) > WeaponBase.MaxHeightDifference)
                     continue;
                 ref var health = ref World.Get<Health>(target);
                 if (health.Current <= 0f)
@@ -152,6 +161,7 @@ public sealed class BulletSystem(World world, GameState state) : GameSystem(worl
                 health.Current -= bullet.Damage;
                 ref var enemy = ref World.Get<Enemy>(target);
                 enemy.HitFlash = 0.08f;
+                State.Emit(GameEventKind.Hit, position.Value, bullet.Height, velocity.Value.Normalized(), (int)WeaponKind.Minigun);
                 enemy.Knockback += velocity.Value.Normalized() * 2f;
                 bullet.LastHit = target;
 

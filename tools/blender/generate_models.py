@@ -1897,25 +1897,6 @@ def build_watering_can():
     return [bake(join(parts, "watering_can"), 1024)]
 
 
-def build_spray_can():
-    """Bug spray at the runner's scale: an aerosol can held in the hand, nozzle forward (-Y). Grip at the origin."""
-    tin = Mat("spray_tin")
-    stripe = tin.math("GREATER_THAN", tin.math("ABSOLUTE", tin.math("SUBTRACT", tin.axis("Y"), -0.02)), 0.05)
-    tin.color(tin.mix(stripe, (0.85, 0.12, 0.08), (0.95, 0.78, 0.1)))  # yellow can, red label band
-    tin.roughness(0.3)
-    tin.metal(0.4)
-    cap = plastic("spray_cap", (0.92, 0.92, 0.9), rough=0.35)
-    nozzle = plastic("spray_nozzle", (0.08, 0.08, 0.08), rough=0.4)
-    rot = (math.pi / 2, 0, 0)
-    parts = [
-        with_material(cylinder("can", 0.042, 0.2, (0, -0.02, 0.0), rot=rot, vertices=24), tin.mat),
-        with_material(cylinder("shoulder", 0.042, 0.03, (0, -0.135, 0.0), rot=rot, vertices=24, radius_top=0.028), tin.mat),
-        with_material(cylinder("cap", 0.026, 0.035, (0, -0.165, 0.0), rot=rot, vertices=16), cap),
-        with_material(box("nozzle", (0.015, 0.02, 0.012), (0, -0.19, 0.012), bevel=0.003), nozzle),
-    ]
-    return [bake(join(parts, "SprayCan"), 512)]
-
-
 def build_mortar():
     """Seed mortar: a short olive tube on a tripod, shells stacked beside it. About 0.6 long (icon / props)."""
     olive = metal("mortar_olive", (0.25, 0.3, 0.14), rough=0.55)
@@ -1935,6 +1916,28 @@ def build_mortar():
     return [bake(join(parts, "mortar"), 512)]
 
 
+def build_void_pulser():
+    """Void Pulser at the runner's scale: a stubby gun with a ringed barrel and a violet plasma sphere
+    in a cage on top. Grip at the origin, barrel forward (-Y)."""
+    body = metal("void_body", (0.08, 0.07, 0.1), rough=0.35)
+    trim = metal("void_trim", (0.55, 0.5, 0.62), rough=0.3)
+    plasma = glow("void_plasma", (0.6, 0.25, 1.0), 4.0)
+    rot = (math.pi / 2, 0, 0)
+    parts = [
+        with_material(box("receiver", (0.11, 0.24, 0.12), (0, -0.05, 0.04), bevel=0.025, segments=3), body),
+        with_material(box("grip", (0.05, 0.06, 0.12), (0, 0.04, -0.05), bevel=0.012), body),
+        with_material(cylinder("barrel", 0.035, 0.22, (0, -0.25, 0.04), rot=rot, vertices=20), body),
+        with_material(sphere("orb", 0.055, (0, -0.06, 0.15), segments=20, rings=12), plasma),
+    ]
+    for i, y in enumerate((-0.18, -0.25, -0.32)):
+        parts.append(with_material(torus(f"ring{i}", 0.048, 0.012, (0, y, 0.04), rot=rot, major_segments=20, minor_segments=8), trim))
+    for i in range(3):
+        a = i * math.tau / 3
+        parts.append(with_material(tube(f"cage{i}", [(math.cos(a) * 0.07, -0.06 + math.sin(a) * 0.07, 0.09),
+                                                      (math.cos(a) * 0.05, -0.06 + math.sin(a) * 0.05, 0.22)], [0.008, 0.008]), trim))
+    return [bake(join(parts, "VoidPulser"), 512, emissive=True)]
+
+
 MODELS = {
     "ant": build_ant,
     "beetle": build_beetle,
@@ -1949,7 +1952,7 @@ MODELS = {
     "cherries": build_cherries,
     "wand": build_wand,
     "minigun": build_minigun,
-    "spray_can": build_spray_can,
+    "void_pulser": build_void_pulser,
     "mortar": build_mortar,
     "stool": build_stool,
     "toy_block": build_toy_block,

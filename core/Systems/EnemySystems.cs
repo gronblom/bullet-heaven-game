@@ -170,10 +170,13 @@ public sealed class EnemyDeathSystem(World world, GameState state) : GameSystem(
 {
     private static readonly QueryDescription Query = new QueryDescription().WithAll<Enemy, Health, Position>();
     private readonly List<(Vector2 Position, int Xp)> _drops = new();
+    /// <summary>Loot to drop: a pickup kind, or -1 - module index for a module.</summary>
+    private readonly List<(Vector2 Position, int What)> _loot = new();
 
     public override void Update(float dt)
     {
         _drops.Clear();
+        _loot.Clear();
         World.Query(in Query, (Entity entity, ref Enemy enemy, ref Health health, ref Position position) =>
         {
             if (health.Current > 0f)
@@ -181,10 +184,37 @@ public sealed class EnemyDeathSystem(World world, GameState state) : GameSystem(
             State.Destroy(entity);
             State.Kills++;
             _drops.Add((position.Value, enemy.XpValue));
+            State.Emit(GameEventKind.Kill, position.Value, State.Terrain.GroundHeight(position.Value) + 0.3f, default, (int)enemy.Kind);
+
+            // Loot: arithmetic modules, armour plates and turret kits, mostly from beetles and the queen.
+            var (module, armor, turret, rolls) = enemy.Kind switch
+            {
+                EnemyKind.Queen => (1f, 1f, 1f, 3),
+                EnemyKind.Beetle => (0.07f, 0.05f, 0.025f, 1),
+                _ => (0.006f, 0.004f, 0.0015f, 1),
+            };
+            for (int r = 0; r < rolls; r++)
+            {
+                var spot = position.Value + Vector2.FromAngle((float)State.Rng.NextDouble() * Mathf.Tau) * (r * 1.2f);
+                if (State.Rng.NextDouble() < module)
+                    _loot.Add((spot, -1 - Modules.RandomIndex(State.Rng, weaponOnly: true)));
+            }
+            if (State.Rng.NextDouble() < armor)
+                _loot.Add((position.Value + new Vector2(0.8f, 0f), (int)PickupKind.ArmorPlate));
+            if (State.Rng.NextDouble() < turret)
+                _loot.Add((position.Value - new Vector2(0.8f, 0f), (int)PickupKind.TurretKit));
         });
 
         // Structural changes happen outside the query.
         foreach (var (position, xp) in _drops)
             World.Create(new Position(position), new Velocity(), new Radius(0.25f), new XpGem { Value = xp });
+        foreach (var (position, what) in _loot)
+        {
+            float ground = State.Terrain.GroundHeight(position);
+            if (what < 0)
+                World.Create(new Position(position), new ModuleDrop { Module = -1 - what, Height = ground });
+            else
+                World.Create(new Position(position), new Pickup { Kind = (PickupKind)what, Height = ground });
+        }
     }
 }

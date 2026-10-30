@@ -1,15 +1,27 @@
 using System;
+using System.Collections.Generic;
 using Arch.Core;
 using BulletHeaven.Ecs;
 using BulletHeaven.Numerics;
 
 namespace BulletHeaven.Systems;
 
-/// <summary>Picks up items (the parachute) the player walks into, and spots the player reaching the secret exit.</summary>
+/// <summary>
+/// Picks up items the player walks into (parachute, armour plates, turret kits, dropped modules), and
+/// spots the player reaching the secret exit. Turret kits deploy a turret on the spot.
+/// </summary>
 public sealed class ItemSystem(World world, GameState state) : GameSystem(world, state)
 {
     private const float Reach = 1.3f;
+    public const float TurretLifetime = 30f;
+    public const float DropLifetime = 45f;
     private static readonly QueryDescription Query = new QueryDescription().WithAll<Pickup, Position>();
+    private static readonly QueryDescription DropQuery = new QueryDescription().WithAll<ModuleDrop, Position>();
+    private readonly List<(Vector2 At, float Height)> _turrets = new();
+    private float _fullMessage;
+
+    /// <summary>Godot front-end: slot modules into free slots straight away (it has no module screen).</summary>
+    public bool AutoFit;
 
     public override void Update(float dt)
     {
@@ -21,11 +33,50 @@ public sealed class ItemSystem(World world, GameState state) : GameSystem(world,
             if (playerPos.DistanceTo(position.Value) > Reach || MathF.Abs(playerHeight - pickup.Height) > 1.5f)
                 return;
             State.Destroy(entity);
-            if (pickup.Kind == PickupKind.Parachute)
+            State.Emit(GameEventKind.Pickup, position.Value, pickup.Height + 0.5f, default, (int)pickup.Kind);
+            switch (pickup.Kind)
             {
-                State.HasParachute = true;
-                State.ShowMessage("PARACHUTE!\nHold jump while falling to glide", 4f);
+                case PickupKind.Parachute:
+                    State.HasParachute = true;
+                    State.ShowMessage("PARACHUTE!\nHold jump while falling to glide", 4f);
+                    break;
+                case PickupKind.ArmorPlate when World.Has<Armor>(State.Player):
+                    ref var armor = ref World.Get<Armor>(State.Player);
+                    armor.Current = MathF.Min(armor.Max, armor.Current + 25f);
+                    State.ShowMessage("+25 ARMOR", 1.2f);
+                    break;
+                case PickupKind.TurretKit:
+                    _turrets.Add((position.Value, pickup.Height));
+                    State.ShowMessage("TURRET DEPLOYED\nIt pulses your TD Mortar rings", 2.5f);
+                    break;
             }
+        });
+        foreach (var (at, height) in _turrets)
+            World.Create(new Position(at), new Turret { Lifetime = TurretLifetime, Height = height });
+        _turrets.Clear();
+
+        _fullMessage -= dt;
+        World.Query(in DropQuery, (Entity entity, ref ModuleDrop drop, ref Position position) =>
+        {
+            drop.Age += dt;
+            if (drop.Age > DropLifetime)
+            {
+                State.Destroy(entity);
+                return;
+            }
+            if (playerPos.DistanceTo(position.Value) > Reach || MathF.Abs(playerHeight - drop.Height) > 1.5f)
+                return;
+            var module = Modules.Get(drop.Module);
+            if (!Modules.Take(World, State, module, AutoFit))
+            {
+                if (_fullMessage <= 0f)
+                    State.ShowMessage("INVENTORY FULL\nTab: fit or drop modules", 1.5f);
+                _fullMessage = 2f;
+                return;
+            }
+            State.Destroy(entity);
+            State.Emit(GameEventKind.Pickup, position.Value, drop.Height + 0.5f, default, -1);
+            State.ShowMessage(AutoFit ? $"{module.Name}" : $"{module.Name}\nTab: fit modules", 1.6f);
         });
 
         if (State.ExitArea is { } exit && !State.ReachedExit && exit.HasPoint(playerPos) && playerHeight >= State.ExitHeight)

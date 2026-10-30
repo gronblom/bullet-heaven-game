@@ -159,6 +159,7 @@ public struct Enemy
     public Vector2 Knockback;
     public float HitFlash;
     public float WalkPhase; // animation only: advances with distance walked
+    public int LastRing;    // id of the last pulse ring that hit it (each ring hits once)
 }
 
 public struct Bullet
@@ -170,33 +171,25 @@ public struct Bullet
     public float Height; // visual only; bullets hit anything they pass over
 }
 
+/// <summary>
+/// Equation-driven flight (see <see cref="Patterns"/>): the entity's velocity is recomputed every
+/// frame from its pattern, so bullets and orbs can weave (sine) or wind outwards (spiral).
+/// </summary>
+public struct PatternMotion
+{
+    public Geometry Mode;    // Linear, Sine or Spiral motion (the other geometries only shape the volley)
+    public Vector2 Direction;
+    public float Speed;
+    public float Frequency;  // f
+    public float Amplitude;  // a
+    public float Phase;      // theta
+    public float Age;        // t
+}
+
 public struct XpGem
 {
     public int Value;
     public bool Magnetized;
-}
-
-public enum WeaponKind : byte
-{
-    Minigun,
-    LightningWand,
-    SeedMortar,
-    BugSpray,
-}
-
-/// <summary>A weapon the player carries. Each is its own entity, so the player can carry several.
-/// Its stats come from <c>WeaponStats</c> by kind plus the modifiers picked for it (stack counts).</summary>
-public struct WeaponSlot
-{
-    public WeaponKind Kind;
-    public byte Damage;  // +40% damage each
-    public byte Rate;    // +25% fire rate each
-    public byte Count;   // +1 stream / orb / seed each
-    public byte Pierce;  // minigun: +1 pierce; wand: +2 chain targets
-    public byte Area;    // minigun: range; wand: zap radius; mortar: blast radius
-    public byte Special; // wand: +2 s orb life each; mortar: seeds leave sticky jam
-    public float Timer;
-    public float Spin; // minigun barrel spin, 0..1 (visual)
 }
 
 public enum LiquidKind : byte
@@ -223,6 +216,8 @@ public struct Puddle
 public enum PickupKind : byte
 {
     Parachute,
+    ArmorPlate, // +25 armour
+    TurretKit,  // deploys a turret running the player's TD Mortar equations
 }
 
 /// <summary>An item lying in the level, collected by touching it.</summary>
@@ -232,21 +227,81 @@ public struct Pickup
     public float Height;
 }
 
-/// <summary>A puff of insecticide from the bug spray: drifts out, swells and fades, poisoning and
-/// slowing every bug inside it while it lasts.</summary>
-public struct SprayPuff
+/// <summary>An arithmetic module dropped by a bug; walk over it to put it in the inventory.</summary>
+public struct ModuleDrop
 {
-    public float Dps;        // damage per second to each bug inside
-    public float Age;
-    public float Lifetime;
-    public float StartRadius;
-    public float EndRadius;
+    public int Module; // index into Modules.All
     public float Height;
-    public float Push;       // knockback away from the puff's path (Knockdown formula)
-    public readonly float Radius => StartRadius + (EndRadius - StartRadius) * MathF.Min(1f, Age / Lifetime);
+    public float Age;
 }
 
-/// <summary>Slow floating ball of lightning that zaps nearby bugs with chain lightning.</summary>
+/// <summary>Armour plating: absorbs contact damage before health.</summary>
+public struct Armor
+{
+    public float Current;
+    public float Max;
+}
+
+/// <summary>A deployed turret: runs the player's current TD Mortar pulse equations from its spot.</summary>
+public struct Turret
+{
+    public float Lifetime;
+    public float Timer;
+    public float Height;
+}
+
+/// <summary>
+/// An expanding pulse wave (TD Mortar): its front sweeps outwards from the centre and burns each bug
+/// it crosses once. The front can wobble (sine) or be a polygon (pentagon).
+/// </summary>
+public struct PulseRing
+{
+    public int Id;
+    public float Radius;
+    public float MaxRadius;
+    public float Speed;
+    public float Width;
+    public float Damage;
+    public float Height;
+    public int Sides;        // 0 = circle, n = regular polygon
+    public float Wobble;     // amplitude of the sine wobble along the front
+    public float WobbleFrequency;
+    public int Lobes;        // wobbles around the ring
+    public float Spin;       // polygon / wobble rotation, radians
+    public float Age;
+
+    /// <summary>Radius of the front in a direction (angle in radians).</summary>
+    public readonly float FrontAt(float angle)
+    {
+        float r = Radius;
+        if (Sides >= 3)
+        {
+            float sector = Mathf.Tau / Sides;
+            float local = ((angle - Spin) % sector + sector) % sector - sector / 2f;
+            r *= MathF.Cos(Mathf.Pi / Sides) / MathF.Cos(local);
+        }
+        if (Wobble > 0f)
+            r += MathF.Sin(Lobes * angle + Spin + Age * WobbleFrequency) * Wobble;
+        return r;
+    }
+}
+
+/// <summary>A heavy, slow plasma orb (Void Pulser): pulls bugs in, burns those at its core and
+/// implodes at the end of its life.</summary>
+public struct VoidOrb
+{
+    public float Dps;
+    public float CoreRadius;
+    public float PullRadius;
+    public float Pull;
+    public float BurstDamage;
+    public float BurstRadius;
+    public float Lifetime;
+    public float Age;
+    public float Height;
+}
+
+/// <summary>Arcane wand orb (wand with a geometry module): flies its pattern and chain-zaps bugs nearby.</summary>
 public struct LightningOrb
 {
     public float Damage;
@@ -255,22 +310,6 @@ public struct LightningOrb
     public float ZapTimer;
     public float Lifetime;
     public float Height;
-}
-
-/// <summary>Seed lobbed in an arc that explodes where it lands.</summary>
-public struct Shell
-{
-    public Vector2 From;
-    public Vector2 To;
-    public float StartHeight;
-    public float EndHeight;
-    public float Apex;
-    public float Flight;
-    public float Duration;
-    public float Damage;
-    public float BlastRadius;
-    public bool Sticky;  // leaves a jam puddle where it lands
-    public float Height; // current, for drawing
 }
 
 /// <summary>Explosion flash (visual only; damage is dealt when it spawns).</summary>

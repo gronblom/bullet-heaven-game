@@ -43,8 +43,8 @@ namespace BulletHeaven.Unity
                 var from = arc.From.ToUnity();
                 var to = arc.To.ToUnity();
                 Jag(from, to, arc.Seed + (int)(time * 30f));
-                Line(line++, 0.18f, new Color(0.5f, 0.75f, 1f, fade));
-                Line(line++, 0.07f, new Color(0.95f, 0.98f, 1f, fade));
+                Line(line++, 0.32f, new Color(0.45f, 0.7f, 1f, fade));
+                Line(line++, 0.11f, new Color(0.95f, 0.98f, 1f, fade));
             }
             for (int i = line; i < _lines.Count; i++)
                 _lines[i].enabled = false;
