@@ -130,6 +130,8 @@ public sealed class EnemySteeringSystem(World world, GameState state) : GameSyst
             }
 
             velocity.Value = desired + push * 12f + enemy.Knockback;
+            // Legs cycle with distance covered; small bugs take quicker steps.
+            enemy.WalkPhase += desired.Length() * dt * 1.8f / radius.Value;
             enemy.Knockback *= knockbackDecay;
             enemy.HitFlash = MathF.Max(0f, enemy.HitFlash - dt);
         });

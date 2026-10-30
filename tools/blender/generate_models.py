@@ -129,6 +129,57 @@ def tag(obj, group):
     return obj
 
 
+def anim_tag(obj, code, root=None, length=1.0):
+    """Per-vertex animation data for the bug walk shader, stored in an "anim" colour attribute.
+    The part code (0 body, 1-3 one side's legs front-to-back, 4-6 the other side's, 7 antennae) is
+    written as bits in R/G/B (0 or 1 survive any colour-space conversion), and A holds how far along
+    the limb the vertex is (0 at the hip, 1 at the tip; alpha is never gamma-converted)."""
+    attr = obj.data.color_attributes.get("anim") or obj.data.color_attributes.new("anim", "FLOAT_COLOR", "POINT")
+    bits = (float(code & 1), float((code >> 1) & 1), float((code >> 2) & 1))
+    for i, v in enumerate(obj.data.vertices):
+        weight = 0.0 if root is None else min(1.0, (v.co - Vector(root)).length / length)
+        attr.data[i].color = (*bits, weight)
+    return obj
+
+
+def ground_and_center(obj):
+    """Move geometry so its bounding box is centred on X/Y and rests on z = 0 (origin at bottom centre)."""
+    xs = [v.co.x for v in obj.data.vertices]
+    ys = [v.co.y for v in obj.data.vertices]
+    zs = [v.co.z for v in obj.data.vertices]
+    offset = Vector(((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2, min(zs)))
+    for v in obj.data.vertices:
+        v.co -= offset
+    obj.data.update()
+    print(f"  {obj.name}: {max(xs) - min(xs):.2f} x {max(ys) - min(ys):.2f} x {max(zs) - min(zs):.2f}")
+    return obj
+
+
+def split_parts(obj, pivots):
+    """After baking, separate vertex groups back out into child objects with their own pivots
+    (so the game can rotate them: limbs, spinning barrels)."""
+    objects = [obj]
+    for part, pivot in pivots.items():
+        activate(obj)
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="DESELECT")
+        obj.vertex_groups.active_index = obj.vertex_groups[part].index
+        bpy.ops.object.vertex_group_select()
+        bpy.ops.mesh.separate(type="SELECTED")
+        bpy.ops.object.mode_set(mode="OBJECT")
+        piece = next(o for o in bpy.context.selected_objects if o is not obj)
+        piece.name = part
+        bpy.context.scene.cursor.location = pivot
+        activate(piece)
+        bpy.ops.object.origin_set(type="ORIGIN_CURSOR")
+        piece.parent = obj
+        objects.append(piece)
+    for o in objects:
+        for group in list(o.vertex_groups):
+            o.vertex_groups.remove(group)
+    return objects
+
+
 def join(objects, name):
     objects = [o for o in objects if o is not None]
     activate(objects[0], objects[1:])
@@ -623,8 +674,14 @@ def export(objects, name, subfolder="models"):
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, name + ".glb")
     activate(objects[0], objects[1:])
+    has_anim = any(o.type == "MESH" and o.data.color_attributes.get("anim") for o in objects)
+    for o in objects:
+        if o.type == "MESH" and o.data.color_attributes.get("anim"):
+            o.data.color_attributes.active_color = o.data.color_attributes["anim"]
     options = dict(filepath=path, export_format="GLB", use_selection=True, export_apply=True, export_yup=True,
-                   export_image_format="JPEG", export_jpeg_quality=88, export_image_quality=88)
+                   export_image_format="JPEG", export_jpeg_quality=88, export_image_quality=88,
+                   export_vertex_color="ACTIVE" if has_anim else "NONE",  # Blender 4.2+
+                   export_colors=has_anim)                                 # Blender 4.0-4.1
     known = bpy.ops.export_scene.gltf.get_rna_type().properties.keys()
     bpy.ops.export_scene.gltf(**{k: v for k, v in options.items() if k in known})
     print(f"  wrote {os.path.relpath(path, ARGS.out)} ({os.path.getsize(path) // 1024} KB)")
@@ -702,12 +759,19 @@ def build_ant():
     ]
     for side in (1, -1):
         # Elbowed antennae and curved mandibles.
-        parts.append(with_material(tube(f"antenna{side}", [(side * 0.08, -0.74, h + 0.18), (side * 0.2, -0.85, h + 0.42),
-                                                          (side * 0.3, -1.08, h + 0.3)], [0.018, 0.016, 0.02]), shell))
+        antenna_root = (side * 0.08, -0.74, h + 0.18)
+        parts.append(anim_tag(with_material(tube(f"antenna{side}", [antenna_root, (side * 0.2, -0.85, h + 0.42),
+                                                                   (side * 0.3, -1.08, h + 0.3)], [0.018, 0.016, 0.02]), shell),
+                              7, antenna_root, 0.45))
         parts.append(with_material(tube(f"mandible{side}", [(side * 0.08, -0.78, h), (side * 0.1, -0.9, h - 0.04),
                                                            (side * 0.02, -0.97, h - 0.05)], [0.03, 0.022, 0.008]), shell))
         for i, (y, spread) in enumerate(((-0.38, (0.8, -0.6)), (-0.25, (1.0, 0.0)), (-0.12, (0.8, 0.7)))):
-            parts.append(with_material(insect_leg(f"leg{side}{i}", Vector((side * 0.09, y, h - 0.05)), spread, 0.62, 0.028, side), shell))
+            hip = Vector((side * 0.09, y, h - 0.05))
+            leg = with_material(insect_leg(f"leg{side}{i}", hip, spread, 0.62, 0.028, side), shell)
+            parts.append(anim_tag(leg, (1 if side > 0 else 4) + i, hip, 0.62))
+    for part in parts:
+        if not part.data.color_attributes.get("anim"):
+            anim_tag(part, 0)
     ant = join(parts, "ant")
     return [bake(ant, 512)]
 
@@ -733,12 +797,19 @@ def build_beetle():
         with_material(sphere("head", 0.17, (0, -0.78, h - 0.02), (1.0, 0.9, 0.7), 20, 10), body),
     ]
     for side in (1, -1):
-        parts.append(with_material(tube(f"antenna{side}", [(side * 0.08, -0.9, h), (side * 0.25, -1.1, h + 0.12),
-                                                          (side * 0.42, -1.25, h + 0.1)], [0.02, 0.018, 0.015]), body))
+        antenna_root = (side * 0.08, -0.9, h)
+        parts.append(anim_tag(with_material(tube(f"antenna{side}", [antenna_root, (side * 0.25, -1.1, h + 0.12),
+                                                                   (side * 0.42, -1.25, h + 0.1)], [0.02, 0.018, 0.015]), body),
+                              7, antenna_root, 0.5))
         parts.append(with_material(tube(f"mandible{side}", [(side * 0.07, -0.92, h - 0.06), (side * 0.05, -1.02, h - 0.08),
                                                            (side * 0.0, -1.05, h - 0.08)], [0.035, 0.025, 0.01]), body))
         for i, (y, spread) in enumerate(((-0.45, (0.8, -0.5)), (-0.15, (1.0, 0.1)), (0.15, (0.8, 0.8)))):
-            parts.append(with_material(insect_leg(f"leg{side}{i}", Vector((side * 0.18, y, h - 0.08)), spread, 0.72, 0.04, side), body))
+            hip = Vector((side * 0.18, y, h - 0.08))
+            leg = with_material(insect_leg(f"leg{side}{i}", hip, spread, 0.72, 0.04, side), body)
+            parts.append(anim_tag(leg, (1 if side > 0 else 4) + i, hip, 0.72))
+    for part in parts:
+        if not part.data.color_attributes.get("anim"):
+            anim_tag(part, 0)
     beetle = join(parts, "beetle")
     return [bake(beetle, 512)]
 
@@ -785,27 +856,8 @@ def build_runner():
     bake(runner, 1024, emissive=True)
 
     # Split the limbs back out with their pivots at hip / shoulder.
-    pivots = {"LegL": (0.1, 0, 0.42), "LegR": (-0.1, 0, 0.42), "ArmL": (0.21, 0, 0.74), "ArmR": (-0.21, 0, 0.74)}
-    objects = [runner]
-    for part, pivot in pivots.items():
-        activate(runner)
-        bpy.ops.object.mode_set(mode="EDIT")
-        bpy.ops.mesh.select_all(action="DESELECT")
-        runner.vertex_groups.active_index = runner.vertex_groups[part].index
-        bpy.ops.object.vertex_group_select()
-        bpy.ops.mesh.separate(type="SELECTED")
-        bpy.ops.object.mode_set(mode="OBJECT")
-        limb = next(o for o in bpy.context.selected_objects if o is not runner)
-        limb.name = part
-        bpy.context.scene.cursor.location = pivot
-        activate(limb)
-        bpy.ops.object.origin_set(type="ORIGIN_CURSOR")
-        limb.parent = runner
-        objects.append(limb)
-    for obj in objects:
-        for group in list(obj.vertex_groups):
-            obj.vertex_groups.remove(group)
-    return objects
+    return split_parts(runner, {"LegL": (0.1, 0, 0.42), "LegR": (-0.1, 0, 0.42),
+                                "ArmL": (0.21, 0, 0.74), "ArmR": (-0.21, 0, 0.74)})
 
 
 def build_gem():
@@ -842,15 +894,18 @@ def build_mug(name, color):
 def build_apple():
     """About 4.6 tall, origin at the bottom."""
     skin_mat = Mat("apple_skin")
-    streaks = skin_mat.noise(scale=3.0, detail=6.0, vector=skin_mat.vec(scale=(6, 6, 0.8)))
-    blush = skin_mat.ramp(streaks, [(0.3, (0.35, 0.02, 0.02)), (0.55, (0.62, 0.04, 0.03)), (0.85, (0.85, 0.45, 0.08))])
-    top = skin_mat.math("MAXIMUM", skin_mat.math("SUBTRACT", skin_mat.axis("Z"), 3.6), 0.0)
-    near_stem = skin_mat.math("MINIMUM", skin_mat.math("MULTIPLY", top, 1.5), 1.0)
-    colored = skin_mat.mix(near_stem, blush, (0.6, 0.55, 0.1))
-    lenticels = skin_mat.math("LESS_THAN", skin_mat.voronoi(scale=9.0), 0.06)
-    skin_mat.color(skin_mat.mix(lenticels, colored, (0.85, 0.75, 0.45)))
-    skin_mat.roughness(skin_mat.gray(skin_mat.noise(scale=6.0), 0.25, 0.5))
-    skin_mat.normal(skin_mat.bump(lenticels, strength=0.15, distance=0.01))
+    # Vertical red streaks over a yellow-green ground colour that shows near the stem.
+    streaks = skin_mat.noise(scale=3.0, detail=8.0, roughness=0.65, vector=skin_mat.vec(scale=(7, 7, 0.6)))
+    blush = skin_mat.ramp(streaks, [(0.25, (0.3, 0.005, 0.01)), (0.5, (0.55, 0.02, 0.02)), (0.7, (0.75, 0.08, 0.03)),
+                                    (0.9, (0.8, 0.5, 0.08))])
+    top = skin_mat.math("MAXIMUM", skin_mat.math("SUBTRACT", skin_mat.axis("Z"), 3.4), 0.0)
+    near_stem = skin_mat.math("MINIMUM", skin_mat.math("MULTIPLY", top, 1.2), 1.0)
+    colored = skin_mat.mix(near_stem, blush, (0.62, 0.55, 0.08))
+    lenticels = skin_mat.math("LESS_THAN", skin_mat.voronoi(scale=14.0), 0.05)
+    skin_mat.color(skin_mat.mix(lenticels, colored, (0.9, 0.78, 0.45)))
+    skin_mat.roughness(skin_mat.gray(skin_mat.noise(scale=6.0), 0.18, 0.35))  # waxy shine
+    skin_mat.normal(skin_mat.bump(lenticels, strength=0.12, distance=0.01,
+                                  previous=skin_mat.bump(skin_mat.noise(scale=2.0, detail=3.0), strength=0.08, distance=0.05)))
     stem_mat = wood("apple_stem", (0.35, 0.22, 0.1), (0.15, 0.08, 0.03), "Z", 10.0, rough=0.8)
 
     apple = sphere("apple", 2.4, (0, 0, 2.3), (1.0, 1.0, 0.95), 40, 24)
@@ -875,14 +930,165 @@ def build_apple():
     leaf = sphere("leaf", 0.5, (0.65, 0.1, 4.55), (1.0, 0.45, 0.06), 16, 8, rot=(0.3, -0.5, 0.4))
     leaf_mat = plastic("leaf", (0.15, 0.4, 0.08), rough=0.5)
     obj = join([with_material(apple, skin_mat.mat), with_material(stem, stem_mat.mat), with_material(leaf, leaf_mat.mat)], "apple")
-    return [bake(obj, 1024)]
+    return [bake(obj, 2048)]
+
+
+def leaf_material(name, color=(0.12, 0.38, 0.06)):
+    m = Mat(name)
+    veins = m.wave("BANDS", "X", scale=12.0, distortion=2.0)
+    m.color(m.mix(m.math("MULTIPLY", m.noise(scale=6.0), 0.4), color, tuple(c * 0.6 for c in color)))
+    m.roughness(0.45)
+    m.normal(m.bump(veins, strength=0.2, distance=0.01))
+    m.set(("Subsurface Weight", "Subsurface"), 0.15)
+    return m
+
+
+def build_strawberry():
+    """About 3.6 tall with its leafy cap; origin at the bottom (tip)."""
+    berry = Mat("strawberry")
+    cells = berry.voronoi(scale=9.0)
+    seeds = berry.math("LESS_THAN", cells, 0.12)
+    pits = berry.math("MINIMUM", berry.math("MULTIPLY", cells, 4.0), 1.0)  # dimples around each seed
+    z = berry.axis("Z")
+    ripe = berry.ramp(berry.noise(scale=3.0, detail=4.0), [(0.3, (0.45, 0.005, 0.01)), (0.75, (0.8, 0.03, 0.03))])
+    shoulders = berry.math("MINIMUM", berry.math("MAXIMUM", berry.math("MULTIPLY", berry.math("SUBTRACT", z, 3.3), 3.0), 0.0), 1.0)
+    flesh = berry.mix(berry.math("MULTIPLY", shoulders, 0.5), ripe, (0.95, 0.7, 0.5))
+    berry.color(berry.mix(seeds, flesh, (0.85, 0.7, 0.2)))
+    berry.roughness(berry.gray(berry.noise(scale=8.0), 0.12, 0.3))  # wet shine
+    berry.normal(berry.bump(pits, strength=0.6, distance=0.05))
+    berry.set(("Subsurface Weight", "Subsurface"), 0.3)
+
+    body = sphere("berry", 1.5, (0, 0, 1.6), (1.0, 1.0, 1.15), 40, 28)
+
+    def shape(v):
+        t = max(0.0, min(1.0, v.z / 3.4))
+        f = 0.25 + 0.75 * min(1.0, t / 0.7) ** 0.7
+        v.x *= f
+        v.y *= f
+        return v
+
+    deform(body, shape)
+    green = leaf_material("calyx")
+    parts = [with_material(body, berry.mat)]
+    top = max(v.co.z for v in body.data.vertices)
+    for i in range(8):
+        angle = i * math.tau / 8
+        parts.append(with_material(sphere(f"sepal{i}", 0.6, (math.cos(angle) * 0.6, math.sin(angle) * 0.6, top - 0.12),
+                                          (1.0, 0.32, 0.05), 12, 6, rot=(0, -0.35, angle)), green))
+    parts.append(with_material(tube("stem", [(0, 0, top - 0.1), (0.05, 0.02, top + 0.4), (0.18, 0.05, top + 0.7)],
+                                    [0.08, 0.07, 0.06]), green))
+    return [bake(ground_and_center(join(parts, "strawberry")), 1024)]
+
+
+def build_orange():
+    """Radius 3.5, origin at the bottom."""
+    peel = Mat("orange_peel")
+    pores = peel.voronoi(scale=28.0)
+    peel.color(peel.ramp(peel.noise(scale=2.0, detail=5.0), [(0.2, (0.8, 0.26, 0.005)), (0.8, (0.93, 0.4, 0.02))]))
+    peel.roughness(peel.gray(pores, 0.25, 0.5))
+    peel.normal(peel.bump(pores, strength=0.5, distance=0.02,
+                          previous=peel.bump(peel.noise(scale=1.5, detail=2.0), strength=0.1, distance=0.05)))
+    peel.set(("Subsurface Weight", "Subsurface"), 0.1)
+    fruit = sphere("orange", 3.5, (0, 0, 3.3), (1.0, 1.0, 0.94), 48, 32)
+    button = cylinder("button", 0.35, 0.15, (0, 0, 6.6), vertices=10)
+    stem_mat = leaf_material("orange_button", (0.3, 0.3, 0.08))
+    obj = join([with_material(fruit, peel.mat), with_material(button, stem_mat.mat)], "orange")
+    return [bake(ground_and_center(obj), 2048)]
+
+
+def build_banana():
+    """A banana lying on the floor, about 15 long (X), curving in the ground plane. Origin at bottom centre."""
+    skin_mat = Mat("banana_skin")
+    x = skin_mat.math("ABSOLUTE", skin_mat.axis("X"))
+    green_ends = skin_mat.math("MINIMUM", skin_mat.math("MAXIMUM", skin_mat.math("MULTIPLY", skin_mat.math("SUBTRACT", x, 5.0), 0.6), 0.0), 1.0)
+    tips = skin_mat.math("GREATER_THAN", x, 7.1)
+    spots = skin_mat.math("LESS_THAN", skin_mat.voronoi(scale=2.5), 0.07)
+    base = skin_mat.ramp(skin_mat.noise(scale=1.5, detail=4.0), [(0.3, (0.8, 0.55, 0.03)), (0.7, (0.95, 0.75, 0.08))])
+    base = skin_mat.mix(skin_mat.math("MULTIPLY", green_ends, 0.8), base, (0.45, 0.5, 0.08))
+    base = skin_mat.mix(spots, base, (0.25, 0.12, 0.03))
+    skin_mat.color(skin_mat.mix(tips, base, (0.12, 0.08, 0.04)))
+    skin_mat.roughness(skin_mat.gray(skin_mat.noise(scale=4.0), 0.35, 0.55))
+    skin_mat.normal(skin_mat.bump(skin_mat.noise(scale=2.0, detail=2.0), strength=0.08, distance=0.05))
+    points, radii = [], []
+    for i in range(9):
+        t = -1.0 + 2.0 * i / 8
+        points.append((t * 7.0, 1.6 * (1 - t * t), 1.25))
+        radii.append(1.25 * (1 - 0.55 * abs(t) ** 2.5))
+    points.append((7.8, 0.0, 1.35))   # stem
+    radii.append(0.35)
+    banana = tube("banana", points, radii, sides=12)
+    return [bake(ground_and_center(with_material(banana, skin_mat.mat)), 2048)]
+
+
+def build_cherries():
+    """Two cherries joined by their stems, about 3.4 tall. Origin at bottom centre."""
+    cherry = Mat("cherry")
+    cherry.color(cherry.ramp(cherry.noise(scale=3.0, detail=4.0), [(0.3, (0.18, 0.0, 0.01)), (0.75, (0.42, 0.01, 0.03))]))
+    cherry.roughness(cherry.gray(cherry.noise(scale=10.0), 0.06, 0.15))
+    cherry.normal(cherry.bump(cherry.noise(scale=1.0, detail=2.0), strength=0.05, distance=0.05))
+    cherry.set(("Subsurface Weight", "Subsurface"), 0.2)
+    stems = leaf_material("cherry_stem", (0.25, 0.35, 0.08))
+    parts = []
+    for i, (cx, cy) in enumerate(((-0.95, 0.0), (0.9, 0.35))):
+        c = sphere(f"cherry{i}", 1.0, (cx, cy, 0.95), (1.0, 1.0, 0.95), 32, 20)
+        deform(c, lambda v, cx=cx, cy=cy: Vector((v.x, v.y, v.z - 0.25 * math.exp(-((v.x - cx) ** 2 + (v.y - cy) ** 2) / 0.08)
+                                                   if v.z > 1.4 else v.z)))
+        parts.append(with_material(c, cherry.mat))
+        parts.append(with_material(tube(f"stem{i}", [(cx, cy, 1.75), (cx * 0.6, cy * 0.6, 2.6), (0.1, 0.1, 3.4)],
+                                        [0.06, 0.05, 0.05]), stems))
+    return [bake(ground_and_center(join(parts, "cherries")), 1024)]
+
+
+def build_wand():
+    """Ball-lightning wand at the runner's scale: grip at the origin, pointing forward (-Y)."""
+    wood_mat = wood("wand_wood", (0.45, 0.28, 0.14), (0.2, 0.11, 0.05), "Y", 30.0, rough=0.5)
+    brass = metal("wand_brass", (0.85, 0.62, 0.25), rough=0.25)
+    crystal = glow("wand_crystal", (0.45, 0.8, 1.0), 3.0)
+    stick = tube("stick", [(0, 0.08, 0), (0.01, -0.15, 0.01), (-0.01, -0.35, 0.0), (0, -0.52, 0.01)],
+                 [0.028, 0.024, 0.02, 0.016], sides=8)
+    parts = [
+        with_material(stick, wood_mat),
+        with_material(torus("ring", 0.03, 0.008, (0, -0.52, 0.01), rot=(math.pi / 2, 0, 0), major_segments=16, minor_segments=6), brass),
+        with_material(sphere("orb", 0.055, (0, -0.58, 0.01), segments=16, rings=10), crystal),
+    ]
+    for i in range(3):
+        angle = i * math.tau / 3
+        parts.append(with_material(tube(f"prong{i}", [(0, -0.52, 0.01), (math.cos(angle) * 0.04, -0.6, 0.01 + math.sin(angle) * 0.04)],
+                                        [0.008, 0.005]), brass))
+    return [bake(join(parts, "Wand"), 512, emissive=True)]
+
+
+def build_minigun():
+    """Minigun at the runner's scale: grip at the origin, barrels forward (-Y) as a child "Barrels" that spins."""
+    gunmetal = metal("gunmetal", (0.12, 0.12, 0.13), rough=0.35)
+    steel = metal("barrel_steel", (0.55, 0.56, 0.58), rough=0.25, brushed_axis="Y")
+    accent = plastic("accent", (0.95, 0.45, 0.05), rough=0.4)
+    body = join([
+        with_material(box("housing", (0.12, 0.22, 0.12), (0, -0.05, 0.03), bevel=0.015, segments=2), gunmetal),
+        with_material(box("handle", (0.04, 0.05, 0.1), (0, 0.04, -0.05), bevel=0.01, segments=2), gunmetal),
+        with_material(box("stripe", (0.125, 0.04, 0.125), (0, -0.1, 0.03)), accent),
+        with_material(cylinder("drum", 0.07, 0.08, (0.09, 0.0, 0.03), rot=(0, math.pi / 2, 0), vertices=20), accent),
+    ], "Minigun")
+    tag(body, "Body")
+    axis = (0.0, -0.16, 0.03)
+    barrel_parts = [with_material(cylinder("hub", 0.05, 0.04, (0, -0.17, 0.03), rot=(math.pi / 2, 0, 0), vertices=16), gunmetal),
+                    with_material(cylinder("collar", 0.055, 0.03, (0, -0.44, 0.03), rot=(math.pi / 2, 0, 0), vertices=16), gunmetal)]
+    for i in range(6):
+        angle = i * math.tau / 6
+        barrel_parts.append(with_material(cylinder(f"barrel{i}", 0.015, 0.36,
+                                                   (math.cos(angle) * 0.035, -0.35, 0.03 + math.sin(angle) * 0.035),
+                                                   rot=(math.pi / 2, 0, 0), vertices=10), steel))
+    barrels = tag(join(barrel_parts, "Barrels"), "Barrels")
+    gun = join([body, barrels], "Minigun")
+    bake(gun, 512)
+    return split_parts(gun, {"Barrels": axis})
 
 
 def build_stool():
-    """Seat radius 3 at height 8.5, origin at the bottom centre."""
+    """Seat radius 3 at height 9, origin at the bottom centre."""
     oak = wood("stool_oak", (0.62, 0.42, 0.24), (0.36, 0.22, 0.11), "Z", 4.0)
     legs_mat = wood("stool_legs", (0.55, 0.37, 0.2), (0.3, 0.18, 0.09), "X", 18.0)
-    seat = cylinder("seat", 3.0, 0.8, (0, 0, 8.1), vertices=48)
+    seat = cylinder("seat", 3.0, 0.8, (0, 0, 8.6), vertices=48)
     bevel = seat.modifiers.new("bevel", "BEVEL")
     bevel.width = 0.2
     bevel.segments = 3
@@ -891,7 +1097,7 @@ def build_stool():
     parts = [with_material(seat, oak.mat)]
     for i in range(4):
         angle = math.pi / 4 + i * math.pi / 2
-        top = Vector((math.cos(angle) * 1.8, math.sin(angle) * 1.8, 7.75))
+        top = Vector((math.cos(angle) * 1.8, math.sin(angle) * 1.8, 8.25))
         foot = Vector((math.cos(angle) * 2.3, math.sin(angle) * 2.3, 0.0))
         parts.append(with_material(tube(f"leg{i}", [foot, top], [0.32, 0.27], smooth_curve=False, sides=12), legs_mat.mat))
     parts.append(with_material(torus("footrest", 2.15, 0.12, (0, 0, 3.0)), legs_mat.mat))
@@ -1067,10 +1273,10 @@ def build_floor_textures():
                                              tiles.math("FLOOR", tiles.math("DIVIDE", y, 4.0))), 2.0)
     parity = tiles.math("ABSOLUTE", parity)
     cloud = tiles.noise(scale=0.8, detail=6.0)
-    light = tiles.ramp(cloud, [(0.3, (0.82, 0.8, 0.74)), (0.7, (0.92, 0.9, 0.85))])
-    dark = tiles.ramp(cloud, [(0.3, (0.46, 0.52, 0.55)), (0.7, (0.56, 0.62, 0.64))])
+    light = tiles.ramp(cloud, [(0.3, (0.55, 0.52, 0.46)), (0.7, (0.64, 0.6, 0.53))])
+    dark = tiles.ramp(cloud, [(0.3, (0.18, 0.22, 0.24)), (0.7, (0.25, 0.29, 0.31))])
     tile_color = tiles.mix(parity, light, dark)
-    tiles.color(tiles.mix(grout, tile_color, (0.55, 0.52, 0.48)))
+    tiles.color(tiles.mix(grout, tile_color, (0.3, 0.28, 0.25)))
     tiles.roughness(tiles.mix(grout, tiles.gray(cloud, 0.12, 0.3), (0.85, 0.85, 0.85)))
     tiles.normal(tiles.bump(tiles.math("SUBTRACT", 1.0, grout), strength=0.6, distance=0.03,
                             previous=tiles.bump(tiles.noise(scale=6.0), strength=0.05, distance=0.01)))
@@ -1102,6 +1308,12 @@ MODELS = {
     "mug_white": lambda: build_mug("mug_white", (0.92, 0.92, 0.9)),
     "mug_red": lambda: build_mug("mug_red", (0.72, 0.12, 0.1)),
     "apple": build_apple,
+    "strawberry": build_strawberry,
+    "orange": build_orange,
+    "banana": build_banana,
+    "cherries": build_cherries,
+    "wand": build_wand,
+    "minigun": build_minigun,
     "stool": build_stool,
     "toy_block": build_toy_block,
     "ball": build_ball,

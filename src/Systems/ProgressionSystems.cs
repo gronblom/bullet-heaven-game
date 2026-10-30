@@ -52,51 +52,64 @@ public sealed class PickupSystem(World world, GameState state) : GameSystem(worl
             State.Xp -= State.XpToNext;
             State.Level++;
             State.XpToNext = 5 + (int)(State.Level * State.Level * 1.5f);
-            State.ShowMessage($"LEVEL {State.Level}: {Upgrades.ApplyRandom(World, State)}");
+            State.ShowMessage($"LEVEL {State.Level}: {Upgrades.LevelUp(World, State)}");
         }
     }
 }
 
-/// <summary>Placeholder upgrade pool, applied at random. Swap for a pick-one-of-three screen later.</summary>
+/// <summary>
+/// Level-up rewards, applied automatically. The wand and the mortar unlock at levels 2 and 3 so
+/// every run gets to play with them; after that it's a mix of weapon levels and passives.
+/// Swap for a pick-one-of-three screen later.
+/// </summary>
 public static class Upgrades
 {
-    public static string ApplyRandom(World world, GameState state)
+    public static string LevelUp(World world, GameState state)
+    {
+        var carried = Arsenal.Carried(world);
+        bool Has(WeaponKind kind) => carried.Exists(w => w.Kind == kind);
+
+        if (!Has(WeaponKind.LightningWand) && state.Level >= 2)
+            return Arsenal.Grant(world, WeaponKind.LightningWand);
+        if (!Has(WeaponKind.SeedMortar) && state.Level >= 3)
+            return Arsenal.Grant(world, WeaponKind.SeedMortar);
+
+        var upgradable = carried.FindAll(w => w.Level < WeaponStats.MaxLevel);
+        if (upgradable.Count > 0 && state.Rng.NextDouble() < 0.6)
+            return Arsenal.Grant(world, upgradable[state.Rng.Next(upgradable.Count)].Kind);
+        return Passive(world, state);
+    }
+
+    private static string Passive(World world, GameState state)
     {
         var player = state.Player;
-        ref var weapon = ref world.Get<Weapon>(player);
         ref var health = ref world.Get<Health>(player);
         bool isCar = world.Has<CarStats>(player);
 
-        switch (state.Rng.Next(8))
+        switch (state.Rng.Next(6))
         {
             case 0:
-                weapon.Cooldown *= 0.85f;
-                return "Faster firing";
+                state.DamageScale *= 1.15f;
+                return "Sharper ammo: +15% damage";
             case 1:
-                weapon.Damage *= 1.25f;
-                return "Bigger bullets";
-            case 2:
-                weapon.Projectiles++;
-                return "Extra barrel";
-            case 3:
-                weapon.Pierce++;
-                return "Piercing rounds";
-            case 4 when isCar:
+                state.CooldownScale *= 0.9f;
+                return "Quick hands: weapons 10% faster";
+            case 2 when isCar:
                 ref var car = ref world.Get<CarStats>(player);
                 car.MaxSpeed += 1.5f;
                 car.Acceleration += 2f;
                 return "Turbo";
-            case 4:
+            case 2:
                 world.Get<RunnerStats>(player).MaxSpeed += 0.8f;
                 return "Running shoes";
-            case 5 when isCar:
+            case 3 when isCar:
                 state.RamDamagePerSpeed *= 1.3f;
                 return "Spiked bumper";
-            case 5:
+            case 3:
                 state.StompDamage *= 1.4f;
                 world.Get<RunnerStats>(player).StompBounce += 1f;
                 return "Heavy boots";
-            case 6:
+            case 4:
                 state.MagnetRadius += 1.5f;
                 return "Gem magnet";
             default:

@@ -24,6 +24,7 @@ public static class Kitchen
     public static readonly Vector2 PlayerStart = new(0f, 30f);
 
     private const float CounterTop = 10f;
+    private const float StoolSeat = 9f;
     private static readonly Rect2 Counter = new(-26f, -18f, 52f, 26f);
 
     public static void Build(Node3D parent, World world, OcclusionFader fader)
@@ -75,7 +76,7 @@ public static class Kitchen
             Add(new PlaneMesh { Size = Bounds.Size }, new Vector3(Bounds.GetCenter().X, 0f, Bounds.GetCenter().Y), floor);
 
             // Walls behind and to the sides; only a skirting board on the camera side.
-            var wall = Materials.Plastic(new Color(0.93f, 0.9f, 0.82f), 0.9f);
+            var wall = Materials.Plastic(new Color(0.72f, 0.66f, 0.56f), 0.9f);
             float w = Bounds.Size.X + 4f, d = Bounds.Size.Y + 4f;
             Add(new BoxMesh { Size = new Vector3(w, 50f, 2f) }, new Vector3(0f, 25f, Bounds.Position.Y - 1f), wall);
             Add(new BoxMesh { Size = new Vector3(2f, 50f, d) }, new Vector3(Bounds.Position.X - 1f, 25f, 0f), wall);
@@ -155,6 +156,10 @@ public static class Kitchen
             Ramp(new Vector2(-14f, 1f), Vector2.Up, 4f, 3f, b, 1f, new Color(0.95f, 0.55f, 0.6f));
             Ramp(new Vector2(19.5f, -3f), Vector2.Right, 5f, 3f, b, 1.4f, new Color(0.3f, 0.3f, 0.35f));
 
+            // Fruit (climbable): a strawberry and a pair of cherries.
+            Fruit("strawberry", new Vector2(11f, 3f), b, 1.3f, 3.4f, new Color(0.8f, 0.05f, 0.05f));
+            Fruit("cherries", new Vector2(-22f, 4f), b, 1.9f, 1.95f, new Color(0.4f, 0.02f, 0.04f));
+
             // Coins and crumbs (decoration only).
             var coin = Materials.Plastic(new Color(0.85f, 0.65f, 0.25f), 0.25f);
             coin.Metallic = 0.9f;
@@ -170,11 +175,11 @@ public static class Kitchen
 
         public void WaysUp()
         {
-            // West: stools by the counter, and a cutting board leaning on one of them.
-            Stool(new Vector2(-14f, 13.5f));
-            Stool(new Vector2(14f, 13.5f));
-            // Its top end meets the seat's edge, so the last step onto the seat is flush.
-            Ramp(new Vector2(-14f, 27.5f), Vector2.Up, 22f, 4f, 0f, 8.5f, new Color(0.7f, 0.5f, 0.3f), plank: true);
+            // West: stools pushed up to the counter (a short hop from seat to top), and a cutting
+            // board leaning on one of them. Its top end meets the seat's edge, so that step is flush.
+            Stool(new Vector2(-14f, 12f));
+            Stool(new Vector2(14f, 12f));
+            Ramp(new Vector2(-14f, 26f), Vector2.Up, 22f, 4f, 0f, StoolSeat, new Color(0.7f, 0.5f, 0.3f), plank: true);
 
             // East: toy block staircase, about one jump per block.
             var colors = new[]
@@ -189,7 +194,7 @@ public static class Kitchen
                 (new Vector2(36f, 2f), 5f, 4.8f),
                 (new Vector2(36f, -4f), 5f, 6.4f),
                 (new Vector2(36f, -10f), 5f, 8f),
-                (new Vector2(30f, -10f), 4f, 9f),
+                (new Vector2(29.5f, -10f), 5f, 9f), // bridges to the counter: a short hop either side
             };
             for (int i = 0; i < steps.Length; i++)
                 ToyBlockTower(steps[i].At, steps[i].Size, steps[i].Top, colors, i);
@@ -223,6 +228,14 @@ public static class Kitchen
             AddObstacle(new Vector2(55f, 32f), new Obstacle { Shape = ObstacleShape.Circle, Radius = 3.6f, Height = 8f });
             fader.Register(Square(new Vector2(55f, 32f), 4f), 8f, ballMaterials);
 
+            // Fruit dropped on the floor: a big orange, and a banana lying on its side.
+            Fruit("orange", new Vector2(-35f, -30f), 0f, 3.5f, 6.6f, new Color(0.95f, 0.45f, 0.05f));
+            var bananaAt = new Vector2(25f, 40f);
+            AddObstacle(bananaAt, new Obstacle { Shape = ObstacleShape.Box, HalfExtents = new Vector2(7.5f, 1.6f), Height = 2.5f });
+            if (Model("banana", new Vector3(bananaAt.X, 0f, bananaAt.Y)) == null)
+                Add(new CapsuleMesh { Radius = 1.2f, Height = 15f }, new Vector3(bananaAt.X, 1.2f, bananaAt.Y),
+                    Materials.Plastic(new Color(0.95f, 0.8f, 0.1f), 0.5f), new Vector3(0f, 0f, 90f));
+
             // A sneaker.
             Block(new Vector2(-58f, 0f), new Vector2(5f, 12f), 0f, 3.5f, new Color(0.9f, 0.9f, 0.92f));
             Add(new BoxMesh { Size = new Vector3(5.4f, 0.8f, 12.4f) }, new Vector3(-58f, 0.4f, 0f),
@@ -249,9 +262,24 @@ public static class Kitchen
             fader.Register(Square(at, radius + 1.6f), baseHeight + height, mat);
         }
 
+        /// <summary>Round fruit: a model if generated, else a coloured sphere. Solid and climbable.</summary>
+        private void Fruit(string model, Vector2 at, float baseHeight, float radius, float height, Color fallback)
+        {
+            AddObstacle(at, new Obstacle { Shape = ObstacleShape.Circle, Radius = radius, Height = baseHeight + height });
+            var materials = Model(model, new Vector3(at.X, baseHeight, at.Y));
+            if (materials == null)
+            {
+                var mat = Materials.Plastic(fallback, 0.25f);
+                Add(new SphereMesh { Radius = radius, Height = height }, new Vector3(at.X, baseHeight + height / 2f, at.Y), mat);
+                materials = new BaseMaterial3D[] { mat };
+            }
+            if (height > 2f)
+                fader.Register(Square(at, radius), baseHeight + height, materials);
+        }
+
         private void Stool(Vector2 at)
         {
-            const float seatTop = 8.5f, radius = 3f;
+            const float seatTop = StoolSeat, radius = 3f;
             // Treated as solid so nothing walks between the legs (the height map has no overhangs).
             AddObstacle(at, new Obstacle { Shape = ObstacleShape.Circle, Radius = radius, Height = seatTop });
             if (Model("stool", new Vector3(at.X, 0f, at.Y)) is { } fitted)

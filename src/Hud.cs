@@ -1,4 +1,7 @@
+using System.Collections.Generic;
+using System.Text;
 using BulletHeaven.Ecs;
+using BulletHeaven.Systems;
 using Godot;
 
 namespace BulletHeaven;
@@ -31,7 +34,8 @@ public sealed partial class Hud : CanvasLayer
         _stats.AddThemeColorOverride("font_outline_color", Colors.Black);
     }
 
-    public void Sync(GameState state, in Health health, int enemies, float speed, float dt)
+    public void Sync(GameState state, in Health health, int enemies, float speed,
+        List<(WeaponKind Kind, int Level, float Spin)> weapons, float dt)
     {
         _health.MaxValue = health.Max;
         _health.Value = health.Current;
@@ -41,10 +45,18 @@ public sealed partial class Hud : CanvasLayer
         int seconds = (int)state.Time;
         _stats.Text = $"Level {state.Level}   Kills {state.Kills}\n" +
                       $"Time {seconds / 60}:{seconds % 60:00}   Speed {speed:0}\n" +
-                      $"Enemies {enemies}   FPS {Engine.GetFramesPerSecond()}";
+                      $"Enemies {enemies}   FPS {Engine.GetFramesPerSecond()}" + WeaponList(weapons);
 
         state.MessageTimer -= dt;
         _message.Text = state.MessageTimer > 0f ? state.Message : "";
+    }
+
+    private static string WeaponList(List<(WeaponKind Kind, int Level, float Spin)> weapons)
+    {
+        var text = new StringBuilder("\n");
+        foreach (var (kind, level, _) in weapons)
+            text.Append($"\n{WeaponStats.Name(kind)}  Lv {level}");
+        return text.ToString();
     }
 
     private static ProgressBar Bar(Color color)

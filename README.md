@@ -23,6 +23,7 @@ You can also compile without the editor: `dotnet build`.
 |---|---|---|
 | Run | WASD / arrows | Left stick |
 | Jump (hold for higher) | Space | A or Y |
+| Try a weapon (debug: add / level up minigun, wand, mortar) | 1 / 2 / 3 | |
 | Restart after getting squashed | R / Enter | Start |
 
 **Playing as the car instead:** select the `Main` node in `scenes/main.tscn` and tick **Drive Car**
@@ -41,11 +42,20 @@ Shift/Ctrl or B to drift, Space or Y to jump.
   and variable height. **Land on a bug to stomp it** and bounce off: chain stomps across a swarm.
 - **Bugs climb**: they run straight at you and scale any wall in the way, so camping on the
   counter just means watching ants pour over the edge. They drop off edges to follow you down.
-- **Auto-aim gun** targeting the nearest bug on your level.
+- **Weapons** (all automatic; several can be carried, each levels up to 8):
+  - **Minigun** (start): a hose of tracer rounds at the nearest bug on your level; spinning barrels.
+  - **Ball-lightning wand** (unlocks at level 2): slow glowing orbs that drift into the swarm and
+    chain-zap several bugs at once, lighting up everything around them.
+  - **Seed mortar** (unlocks at level 3): lobs seeds at random bugs in range, even onto the
+    counter from the floor, that burst on landing.
+- **Bugs walk**: legs step in a tripod gait and antennae feel around (animated in a shader, so
+  a thousand of them stay cheap); they turn nose-up to climb walls and tip over as they fall.
+- **Fruit** (Pikmin-style, glossy and detailed): apple, strawberry and cherries on the counter,
+  an orange and a banana on the floor. All solid and climbable.
 - **Enemies**: ants, plus tanky, slow-climbing beetles after 45 s; spawn rate ramps up and a swarm
   arrives every 30 s.
-- **XP gems** with magnet pickup; each level-up applies a random upgrade (fire rate, damage,
-  extra barrel, piercing, running shoes, heavy boots, magnet, repair).
+- **XP gems** with magnet pickup; level-ups unlock the wand and the mortar, then level up a
+  weapon or give a passive (damage, fire rate, running shoes, heavy boots, magnet, repair).
 - **Look**: baked PBR models and textures, narrow FOV + near/far depth of field (tilt-shift),
   soft shadows, SSAO, screen-space bounce light and reflections.
 
@@ -73,7 +83,9 @@ of the script: shapes plus a material recipe.
 | File | Used for |
 |---|---|
 | `runner.glb` | the player (separate `LegL/LegR/ArmL/ArmR` parts so the run cycle still animates) |
-| `ant.glb`, `beetle.glb` | enemies |
+| `ant.glb`, `beetle.glb` | enemies (an `anim` vertex colour tags legs and antennae for the walk shader) |
+| `minigun.glb`, `wand.glb` | weapons in the runner's hands (the minigun's `Barrels` part spins) |
+| `strawberry.glb`, `orange.glb`, `banana.glb`, `cherries.glb` | fruit |
 | `gem.glb` | XP gems |
 | `counter.glb`, `stool.glb`, `cutting_board.glb`, `toy_block.glb` | the kitchen counter and the ways up (blocks are tinted in game) |
 | `mug_white.glb`, `mug_red.glb`, `apple.glb`, `book_blue.glb`, `book_gold.glb`, `cereal_box.glb`, `pencil.glb` | props on the counter |

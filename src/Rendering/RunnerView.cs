@@ -9,6 +9,7 @@ namespace BulletHeaven.Rendering;
 /// Pikmin-sized dude built from primitives. Either way he gets a procedural run cycle (swinging
 /// legs and arms; a model needs child nodes named LegL, LegR, ArmL and ArmR pivoted at hip and
 /// shoulder, which the Blender generator makes), a jump pose and a squash on landing.
+/// Carried weapons (minigun.glb, wand.glb) are held in his hands, the minigun's barrels spinning.
 /// </summary>
 public sealed partial class RunnerView : Node3D
 {
@@ -19,6 +20,10 @@ public sealed partial class RunnerView : Node3D
     private readonly bool _modelLimbs;
     private float _phase;
     private float _squash;
+    private Node3D _minigun;
+    private Node3D _wand;
+    private Node3D _barrels;
+    private float _barrelAngle;
 
     public RunnerView() : this(new Color(0.95f, 0.45f, 0.1f)) { }
 
@@ -41,7 +46,45 @@ public sealed partial class RunnerView : Node3D
         }
     }
 
-    public void Sync(in Position position, in Velocity velocity, in Runner runner, in Elevation elevation, in Health health, float dt)
+    /// <summary>Shows the weapons being carried (minigun in the right hand, wand in the left).</summary>
+    public void ShowWeapons(bool minigun, bool wand)
+    {
+        if (minigun && _minigun == null)
+        {
+            _minigun = Hold("minigun", 1);
+            if (_minigun != null)
+                _barrels = ModelLibrary.FindNode(_minigun, "Barrels");
+        }
+        if (wand && _wand == null)
+            _wand = Hold("wand", 0);
+        if (_minigun != null)
+            _minigun.Visible = minigun;
+        if (_wand != null)
+            _wand.Visible = wand;
+    }
+
+    private Node3D Hold(string model, int arm)
+    {
+        if (ModelLibrary.LoadProp(model) is not { } weapon || _arms[arm] == null)
+            return null;
+        if (_modelLimbs)
+        {
+            // Hand position relative to the shoulder pivot, in the model's own frame (facing +Z).
+            float side = arm == 0 ? 1f : -1f;
+            weapon.Node.Position = new Vector3(side * 0.06f, -0.35f, 0.03f);
+        }
+        else
+        {
+            weapon.Node.Position = new Vector3(0f, -0.3f, 0f);
+            weapon.Node.RotationDegrees = new Vector3(0f, 90f, 0f); // weapons face +Z, this dude faces +X
+            weapon.Node.Scale = Vector3.One * 0.8f;
+        }
+        _arms[arm].AddChild(weapon.Node);
+        return weapon.Node;
+    }
+
+    public void Sync(in Position position, in Velocity velocity, in Runner runner, in Elevation elevation, in Health health,
+        float minigunSpin, float dt)
     {
         Position = new Vector3(position.Value.X, elevation.Height, position.Value.Y);
         Rotation = new Vector3(0f, -runner.Facing, 0f);
@@ -60,6 +103,11 @@ public sealed partial class RunnerView : Node3D
             _legs[1].Rotation = new Vector3(-swing + airLegs * 0.5f, 0f, 0f);
             _arms[0].Rotation = new Vector3(-swing * 0.8f + airArms, 0f, 0f);
             _arms[1].Rotation = new Vector3(swing * 0.8f + airArms, 0f, 0f);
+            // An armed hand stays forward, aiming, with just a little bob.
+            if (_wand is { Visible: true })
+                _arms[0].Rotation = new Vector3(-0.35f - swing * 0.1f, 0f, 0f);
+            if (_minigun is { Visible: true })
+                _arms[1].Rotation = new Vector3(-0.3f + swing * 0.1f, 0f, 0f);
         }
         else if (!_hasModel)
         {
@@ -70,6 +118,12 @@ public sealed partial class RunnerView : Node3D
             _legs[1].Rotation = new Vector3(0f, 0f, -swing - airLegs * 0.5f);
             _arms[0].Rotation = new Vector3(airArms, 0f, -swing * 0.8f);
             _arms[1].Rotation = new Vector3(-airArms, 0f, swing * 0.8f);
+        }
+
+        if (_barrels != null)
+        {
+            _barrelAngle += minigunSpin * 35f * dt;
+            _barrels.Rotation = new Vector3(0f, 0f, _barrelAngle);
         }
 
         // Bob while running, lean into speed, squash on landing.

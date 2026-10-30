@@ -26,6 +26,11 @@ public sealed class GameState
     public float MagnetRadius = 4f;
     public float RamDamagePerSpeed = 2.5f;
     public float StompDamage = 30f;
+    public float DamageScale = 1f;   // all weapons
+    public float CooldownScale = 1f; // all weapons, lower is faster
+
+    /// <summary>Lightning bolts to draw (visual only; damage is already dealt). Aged out by the renderer.</summary>
+    public readonly List<LightningArc> Arcs = new();
 
     public string Message = "";
     public float MessageTimer;
@@ -56,4 +61,13 @@ public sealed class GameState
         Message = text;
         MessageTimer = seconds;
     }
+}
+
+/// <summary>One lightning bolt between two points, flickering for a moment.</summary>
+public sealed class LightningArc(Vector3 from, Vector3 to, int seed)
+{
+    public readonly Vector3 From = from;
+    public readonly Vector3 To = to;
+    public readonly int Seed = seed;
+    public float Age;
 }

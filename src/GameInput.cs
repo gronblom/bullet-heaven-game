@@ -16,6 +16,8 @@ public static class GameInput
     public const string Jump = "jump";
     public const string RunnerJump = "runner_jump"; // A is free when not driving
     public const string Restart = "restart";
+    /// <summary>Number keys 1-3: add or level up the minigun, wand and mortar (for trying them out).</summary>
+    public static readonly string[] DebugWeapons = { "debug_weapon_1", "debug_weapon_2", "debug_weapon_3" };
 
     public static void Register()
     {
@@ -29,6 +31,9 @@ public static class GameInput
         Add(Jump, Key(Godot.Key.Space), Button(JoyButton.Y));
         Add(RunnerJump, Key(Godot.Key.Space), Button(JoyButton.A), Button(JoyButton.Y));
         Add(Restart, Key(Godot.Key.R), Key(Godot.Key.Enter), Button(JoyButton.Start));
+        Add(DebugWeapons[0], Key(Godot.Key.Key1));
+        Add(DebugWeapons[1], Key(Godot.Key.Key2));
+        Add(DebugWeapons[2], Key(Godot.Key.Key3));
     }
 
     private static void Add(string action, params InputEvent[] events)

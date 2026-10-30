@@ -144,6 +144,7 @@ public struct Enemy
     public int XpValue;
     public Vector2 Knockback;
     public float HitFlash;
+    public float WalkPhase; // animation only: advances with distance walked
 }
 
 public struct Bullet
@@ -161,30 +162,55 @@ public struct XpGem
     public bool Magnetized;
 }
 
-/// <summary>Auto-aiming gun mounted on the car.</summary>
-public struct Weapon
+public enum WeaponKind : byte
 {
-    public float Cooldown;
-    public float Timer;
-    public float Range;
-    public float BulletSpeed;
-    public float Damage;
-    public float Lifetime;
-    public float Spread; // radians between projectiles
-    public int Projectiles;
-    public int Pierce;
+    Minigun,
+    LightningWand,
+    SeedMortar,
+}
 
-    public static Weapon Default => new()
-    {
-        Cooldown = 0.45f,
-        Range = 14f,
-        BulletSpeed = 32f,
-        Damage = 6f,
-        Lifetime = 0.8f,
-        Spread = 0.12f,
-        Projectiles = 1,
-        Pierce = 0,
-    };
+/// <summary>A weapon the player carries. Each is its own entity, so the player can carry several;
+/// its stats come from <c>WeaponStats</c> by kind and level.</summary>
+public struct WeaponSlot
+{
+    public WeaponKind Kind;
+    public int Level;
+    public float Timer;
+    public float Spin; // minigun barrel spin, 0..1 (visual)
+}
+
+/// <summary>Slow floating ball of lightning that zaps nearby bugs with chain lightning.</summary>
+public struct LightningOrb
+{
+    public float Damage;
+    public float ZapRadius;
+    public int MaxTargets;
+    public float ZapTimer;
+    public float Lifetime;
+    public float Height;
+}
+
+/// <summary>Seed lobbed in an arc that explodes where it lands.</summary>
+public struct Shell
+{
+    public Vector2 From;
+    public Vector2 To;
+    public float StartHeight;
+    public float EndHeight;
+    public float Apex;
+    public float Flight;
+    public float Duration;
+    public float Damage;
+    public float BlastRadius;
+    public float Height; // current, for drawing
+}
+
+/// <summary>Explosion flash (visual only; damage is dealt when it spawns).</summary>
+public struct Blast
+{
+    public float Age;
+    public float Radius;
+    public float Height;
 }
 
 public enum ObstacleShape : byte

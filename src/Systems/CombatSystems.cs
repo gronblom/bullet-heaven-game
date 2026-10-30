@@ -119,52 +119,6 @@ public sealed class PlayerContactSystem(World world, GameState state) : GameSyst
     }
 }
 
-/// <summary>Fires the player's auto-aim gun at the nearest bug in range on roughly the same level.</summary>
-public sealed class WeaponSystem(World world, GameState state) : GameSystem(world, state)
-{
-    public const float MaxHeightDifference = 2f;
-
-    private static readonly QueryDescription Query = new QueryDescription().WithAll<PlayerTag, Position, Velocity, Elevation, Weapon>();
-    private readonly List<int> _scratch = new();
-    private readonly List<(Vector2 Position, Vector2 Velocity, Bullet Bullet)> _shots = new();
-
-    public override void Update(float dt)
-    {
-        _shots.Clear();
-        var grid = State.EnemyGrid;
-
-        World.Query(in Query, (ref Position position, ref Velocity playerVelocity, ref Elevation elevation, ref Weapon weapon) =>
-        {
-            weapon.Timer -= dt;
-            if (weapon.Timer > 0f)
-                return;
-
-            int target = grid.Nearest(position.Value, weapon.Range, _scratch, elevation.Height, MaxHeightDifference);
-            if (target < 0)
-                return; // hold fire until something is in range
-
-            weapon.Timer = weapon.Cooldown;
-            float aim = (grid.Positions[target] - position.Value).Angle();
-            for (int k = 0; k < weapon.Projectiles; k++)
-            {
-                float angle = aim + (k - (weapon.Projectiles - 1) * 0.5f) * weapon.Spread;
-                var velocity = Vector2.FromAngle(angle) * weapon.BulletSpeed + playerVelocity.Value * 0.5f;
-                _shots.Add((position.Value, velocity, new Bullet
-                {
-                    Damage = weapon.Damage,
-                    Lifetime = weapon.Lifetime,
-                    PierceLeft = weapon.Pierce,
-                    LastHit = Entity.Null,
-                    Height = elevation.Height + 0.5f,
-                }));
-            }
-        });
-
-        foreach (var (position, velocity, bullet) in _shots)
-            World.Create(new Position(position), new Velocity(velocity), new Radius(0.18f), bullet);
-    }
-}
-
 /// <summary>Ages bullets and applies hits against bugs at about the bullet's height.</summary>
 public sealed class BulletSystem(World world, GameState state) : GameSystem(world, state)
 {
@@ -189,7 +143,7 @@ public sealed class BulletSystem(World world, GameState state) : GameSystem(worl
             foreach (int i in _hits)
             {
                 var target = grid.Entities[i];
-                if (target == bullet.LastHit || MathF.Abs(grid.Heights[i] + 0.5f - bullet.Height) > WeaponSystem.MaxHeightDifference)
+                if (target == bullet.LastHit || MathF.Abs(grid.Heights[i] + 0.5f - bullet.Height) > WeaponStats.MaxHeightDifference)
                     continue;
                 ref var health = ref World.Get<Health>(target);
                 if (health.Current <= 0f)
