@@ -17,6 +17,16 @@ alternative player.
 
 You can also compile without the editor: `dotnet build`.
 
+## Unity version
+
+There is also a Unity 6 (URP) version of the same game in `unity/`; see `unity/README.md`. Both
+front-ends share the gameplay in `core/` (engine-independent C#: the Arch ECS components and systems,
+the levels, small maths types) and the models in `assets/`.
+
+Gameplay checks run without any engine: `dotnet run --project tests` builds the real levels headless and
+plays them with bots (climbing routes, the parachute glide, puddles, weapons, modifiers, the boss, a
+1,500-bug stress test).
+
 ## Controls
 
 | Action | Keyboard | Gamepad |
@@ -150,19 +160,19 @@ Keep bugs low-poly (a few thousand triangles): there can be over a thousand on s
 ## Architecture
 
 ```
-src/
-  Main.cs              Entry point: creates the ECS world, runs systems, syncs visuals
+core/                  Shared, engine-independent gameplay (netstandard2.1, used by Godot and Unity)
+  Ecs/                 Components, GameState, SpatialGrid, Terrain (ground height + walls)
+  Systems/             One class per behaviour, run in a fixed order by the front-end
+  Levels/              Level base class + Kitchen, Study, Windowsill; LevelLayout = visuals as data
+  Numerics/            Vector2/Vector3/Rect2/Mathf/Color with Godot's names and behaviour
+tests/                 Headless gameplay checks: dotnet run --project tests
+src/                   Godot front-end
+  Main.cs              Creates the ECS world, fills in input, runs systems, syncs visuals
   GameInput.cs         Input actions registered in code
-  Hud.cs               HUD
-  Ecs/
-    Components.cs      Plain data structs (Position, Velocity, Car, Enemy, Weapon, ...)
-    GameState.cs       Run-wide state + deferred entity destruction
-    SpatialGrid.cs     Per-frame uniform grid for neighbour / hit queries
-  Systems/             One class per behaviour, run in a fixed order from Main
-  Rendering/           MultiMesh batches, runner/car views, model loading, occlusion fading
+  Hud.cs, Overlay.cs   HUD and card menus
+  Rendering/           LevelView (layout -> nodes), MultiMesh batches, runner/car views, models, fading
+unity/                 Unity front-end (see unity/README.md)
 tools/blender/         generate_models.py: builds and bakes every model
-  Levels/              Level base class + Kitchen, Study, Windowsill
-  Ecs/Terrain.cs       Ground height + walls from Obstacle/Ramp entities
 ```
 
 - **Gameplay is pure ECS.** Godot nodes are only used for presentation. Horizontal movement runs

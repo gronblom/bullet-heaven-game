@@ -1,9 +1,16 @@
 # Notes for Claude
 
 - Godot 4.7 .NET project, C# (net8.0), gameplay in the Arch ECS (`Arch` NuGet package).
-- Build check: `dotnet build` (Godot itself is usually not available in cloud sessions).
-- Gameplay state lives only in ECS components (`src/Ecs/Components.cs`); systems in `src/Systems/`
-  run in the order listed in `Main._Ready`. Godot nodes are presentation only.
+- Build check: `dotnet build BulletHeaven.csproj` (Godot itself is usually not available in cloud sessions),
+  and run `dotnet run --project tests` (headless gameplay checks; exit code 1 on failure).
+- Layout: gameplay lives in `core/` (netstandard2.1, no engine types; `BulletHeaven.Numerics` mirrors the
+  Godot maths API), shared by the Godot front-end (`src/`) and the Unity one (`unity/`, C# 9 only: no
+  file-scoped namespaces or primary constructors there). Levels record visuals as `LevelLayout` data;
+  each front-end's `LevelView` draws it. Input reaches the core through `GameState.Input`.
+- Unity can't run in cloud sessions; check Unity scripts at least by parsing them as C# 9 and compiling
+  against the core DLL. Unity maps the ground plane (x, y) at height h to (x, h, -y).
+- Gameplay state lives only in ECS components (`core/Ecs/Components.cs`); systems in `core/Systems/`
+  run in the order listed in `Main._Ready` (Godot) and `GameRunner.Begin` (Unity); keep the two in sync. Godot nodes are presentation only.
 - Never create/destroy entities inside `World.Query` lambdas: use `GameState.Destroy` or collect
   and create afterwards.
 - Ground plane: `Vector2 (x, y)` maps to world `(x, 0, y)`; models face +X; a node's Y rotation is `-heading`.
@@ -23,6 +30,5 @@
   fallback. In cloud sessions the Ubuntu `blender` package can't bake (outputs blank textures); use the
   official build via `pip install bpy` (needs Python 3.13) and run the script with that Python.
 - Keep the C# style: file-scoped namespaces, primary-constructor systems, XML summary on each type.
-- Levels derive from `src/Levels/Level.cs`. Put collision first and guard every visual step with `Visual`
-  (or use the helpers, which do): a level built with a null parent must yield collision only, so the
-  headless route tests can build it. Check new climbing routes with a bot run, steps <= ~1.8 high.
+- Levels derive from `core/Levels/Level.cs` and only use its helpers (collision + matching visual record),
+  so the headless tests and both engines build the same thing. Check new climbing routes with a bot run, steps <= ~1.8 high.

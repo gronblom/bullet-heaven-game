@@ -1,0 +1,207 @@
+using System;
+using System.Diagnostics;
+using System.IO;
+using UnityEditor;
+using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
+using Debug = UnityEngine.Debug;
+
+namespace BulletHeaven.Unity.Editor
+{
+    /// <summary>
+    /// Keeps the Unity project fed from the rest of the repository:
+    /// - builds ../core (the shared gameplay library) with the .NET SDK and copies the DLLs into
+    ///   Assets/Plugins/Core,
+    /// - copies the generated models and textures from ../assets into Assets/Resources,
+    /// - makes sure URP is the active render pipeline.
+    /// Runs by itself when the editor opens and the core DLL is missing or older than its sources;
+    /// also from the menu (Bullet Heaven > Sync core + models) and from the command line:
+    ///   Unity.exe -batchmode -quit -projectPath unity -executeMethod BulletHeaven.Unity.Editor.Setup.Run -logFile setup.log
+    /// This assembly doesn't reference the game's scripts, so it still compiles while the core DLL
+    /// is missing (which is exactly when it's needed).
+    /// </summary>
+    [InitializeOnLoad]
+    public static class Setup
+    {
+        private const string PluginFolder = "Assets/Plugins/Core";
+
+        // Unity's own runtime already provides this one; a second copy is a compile error.
+        private static readonly string[] SkipDlls = { "System.Runtime.CompilerServices.Unsafe.dll" };
+
+        private static string RepoRoot => Path.GetFullPath(Path.Combine(Application.dataPath, "..", ".."));
+
+        static Setup()
+        {
+            if (Application.isBatchMode)
+                return; // Run is called explicitly there
+            EditorApplication.delayCall += () =>
+            {
+                EnsureRenderPipeline();
+                EnsureLegacyInput();
+                if (CoreIsStale() || !Directory.Exists(Path.Combine(Application.dataPath, "Resources", "Models")))
+                    Sync();
+            };
+        }
+
+        /// <summary>Command-line entry point: sync everything and exit non-zero on failure.</summary>
+        public static void Run()
+        {
+            try
+            {
+                EnsureRenderPipeline();
+                EnsureLegacyInput();
+                if (!Sync())
+                    EditorApplication.Exit(1);
+            }
+            catch (Exception e)
+            {
+                Debug.LogException(e);
+                EditorApplication.Exit(1);
+            }
+        }
+
+        [MenuItem("Bullet Heaven/Sync core + models")]
+        public static bool Sync()
+        {
+            bool ok = BuildCore();
+            CopyFolder(Path.Combine(RepoRoot, "assets", "models"), Path.Combine(Application.dataPath, "Resources", "Models"), "*.glb");
+            CopyFolder(Path.Combine(RepoRoot, "assets", "textures"), Path.Combine(Application.dataPath, "Resources", "Textures"), "*.jpg");
+            AssetDatabase.Refresh();
+            Debug.Log(ok ? "Bullet Heaven: core and models synced." : "Bullet Heaven: core build FAILED, see the log above.");
+            return ok;
+        }
+
+        private static bool CoreIsStale()
+        {
+            string dll = Path.Combine(Application.dataPath, "Plugins", "Core", "BulletHeaven.Core.dll");
+            if (!File.Exists(dll))
+                return true;
+            var built = File.GetLastWriteTimeUtc(dll);
+            foreach (var source in Directory.GetFiles(Path.Combine(RepoRoot, "core"), "*.cs", SearchOption.AllDirectories))
+            {
+                if (!source.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar) && File.GetLastWriteTimeUtc(source) > built)
+                    return true;
+            }
+            return false;
+        }
+
+        /// <summary>dotnet publish ../core into a temp folder, then copy the DLLs Unity needs.</summary>
+        private static bool BuildCore()
+        {
+            string output = Path.Combine(Path.GetTempPath(), "BulletHeaven.Core.publish");
+            string project = Path.Combine(RepoRoot, "core", "BulletHeaven.Core.csproj");
+            var info = new ProcessStartInfo("dotnet", $"publish \"{project}\" -c Release -o \"{output}\" -nologo")
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            try
+            {
+                using var process = Process.Start(info);
+                string log = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+                process.WaitForExit();
+                if (process.ExitCode != 0)
+                {
+                    Debug.LogError("Building ../core failed (is the .NET 8 SDK installed and `dotnet` on PATH?):\n" + log);
+                    return false;
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError("Couldn't run `dotnet` to build ../core. Install the .NET 8 SDK and restart Unity.\n" + e.Message);
+                return false;
+            }
+
+            string target = Path.Combine(Application.dataPath, "Plugins", "Core");
+            Directory.CreateDirectory(target);
+            foreach (var dll in Directory.GetFiles(output, "*.dll"))
+            {
+                if (Array.IndexOf(SkipDlls, Path.GetFileName(dll)) < 0)
+                    File.Copy(dll, Path.Combine(target, Path.GetFileName(dll)), true);
+            }
+            return true;
+        }
+
+        private static void CopyFolder(string from, string to, string pattern)
+        {
+            if (!Directory.Exists(from))
+            {
+                Debug.LogWarning($"Bullet Heaven: {from} not found; the game will use primitive placeholders.");
+                return;
+            }
+            Directory.CreateDirectory(to);
+            foreach (var file in Directory.GetFiles(from, pattern))
+            {
+                string destination = Path.Combine(to, Path.GetFileName(file));
+                if (!File.Exists(destination) || File.GetLastWriteTimeUtc(file) > File.GetLastWriteTimeUtc(destination))
+                    File.Copy(file, destination, true);
+            }
+        }
+
+        /// <summary>
+        /// The game reads UnityEngine.Input (the classic input manager). Projects created from the newer
+        /// templates only enable the Input System package, so switch "Active Input Handling" to Both.
+        /// </summary>
+        private static void EnsureLegacyInput()
+        {
+            var settings = Unsupported.GetSerializedAssetInterfaceSingleton("PlayerSettings");
+            if (settings == null)
+                return;
+            var serialized = new SerializedObject(settings);
+            var handler = serialized.FindProperty("activeInputHandler");
+            if (handler == null || handler.intValue != 1)
+                return; // 0 = old only, 2 = both: fine
+            handler.intValue = 2;
+            serialized.ApplyModifiedProperties();
+            Debug.LogWarning("Bullet Heaven: set Player Settings > Active Input Handling to Both. Restart Unity for it to take effect.");
+        }
+
+        /// <summary>Creates and assigns a URP asset if the project has no render pipeline yet.</summary>
+        private static void EnsureRenderPipeline()
+        {
+            if (GraphicsSettings.defaultRenderPipeline is UniversalRenderPipelineAsset)
+                return;
+
+            Directory.CreateDirectory(Path.Combine(Application.dataPath, "Settings"));
+            var asset = UniversalRenderPipelineAsset.Create();
+            asset.shadowDistance = 140f;
+            asset.supportsHDR = true;
+            asset.msaaSampleCount = 4;
+            asset.supportsCameraDepthTexture = true;
+            AssetDatabase.CreateAsset(asset, "Assets/Settings/URP.asset");
+            // The renderer data is created alongside; keep it as its own asset so it survives reloads.
+            var rendererData = asset.rendererDataList.Length > 0 ? asset.rendererDataList[0] : null;
+            if (rendererData != null && !AssetDatabase.Contains(rendererData))
+                AssetDatabase.AddObjectToAsset(rendererData, asset);
+            AssetDatabase.SaveAssets();
+
+            GraphicsSettings.defaultRenderPipeline = asset;
+            for (int i = 0; i < QualitySettings.names.Length; i++)
+            {
+                QualitySettings.SetQualityLevel(i, false);
+                QualitySettings.renderPipeline = asset;
+            }
+            Debug.Log("Bullet Heaven: created Assets/Settings/URP.asset and made URP the render pipeline.");
+        }
+    }
+
+    /// <summary>Imports the *_normal textures as normal maps.</summary>
+    public sealed class TextureImport : AssetPostprocessor
+    {
+        private void OnPreprocessTexture()
+        {
+            if (!assetPath.Contains("/Resources/Textures/"))
+                return;
+            var importer = (TextureImporter)assetImporter;
+            if (assetPath.EndsWith("_normal.jpg", StringComparison.OrdinalIgnoreCase))
+                importer.textureType = TextureImporterType.NormalMap;
+            else if (assetPath.EndsWith("_roughness.jpg", StringComparison.OrdinalIgnoreCase))
+                importer.sRGBTexture = false;
+            importer.wrapMode = TextureWrapMode.Repeat;
+            importer.anisoLevel = 8;
+        }
+    }
+}
