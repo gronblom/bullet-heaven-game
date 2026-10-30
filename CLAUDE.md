@@ -7,6 +7,8 @@
   Godot maths API), shared by the Godot front-end (`src/`) and the Unity one (`unity/`, C# 9 only: no
   file-scoped namespaces or primary constructors there). Levels record visuals as `LevelLayout` data;
   each front-end's `LevelView` draws it. Input reaches the core through `GameState.Input`.
+- After changing `core/`, rebuild the committed Unity copies: `dotnet publish core -c Release -o <tmp>` and copy
+  the DLLs (except System.Runtime.CompilerServices.Unsafe.dll) into `unity/Assets/Plugins/Core`.
 - Unity can't run in cloud sessions; check Unity scripts at least by parsing them as C# 9 and compiling
   against the core DLL. Unity maps the ground plane (x, y) at height h to (x, h, -y).
 - Gameplay state lives only in ECS components (`core/Ecs/Components.cs`); systems in `core/Systems/`

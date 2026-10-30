@@ -15,11 +15,11 @@ namespace BulletHeaven.Unity.Editor
     ///   Assets/Plugins/Core,
     /// - copies the generated models and textures from ../assets into Assets/Resources,
     /// - makes sure URP is the active render pipeline.
-    /// Runs by itself when the editor opens and the core DLL is missing or older than its sources;
-    /// also from the menu (Bullet Heaven > Sync core + models) and from the command line:
+    /// The core DLLs are committed (Unity only runs editor scripts once every script compiles, and the
+    /// game scripts need them), so this runs by itself only when the DLLs or the models are missing;
+    /// when ../core has newer sources it says so. Otherwise use the menu (Bullet Heaven > Sync core +
+    /// models), or the command line:
     ///   Unity.exe -batchmode -quit -projectPath unity -executeMethod BulletHeaven.Unity.Editor.Setup.Run -logFile setup.log
-    /// This assembly doesn't reference the game's scripts, so it still compiles while the core DLL
-    /// is missing (which is exactly when it's needed).
     /// </summary>
     [InitializeOnLoad]
     public static class Setup
@@ -39,8 +39,11 @@ namespace BulletHeaven.Unity.Editor
             {
                 EnsureRenderPipeline();
                 EnsureLegacyInput();
-                if (CoreIsStale() || !Directory.Exists(Path.Combine(Application.dataPath, "Resources", "Models")))
+                bool missing = !File.Exists(CoreDll) || !Directory.Exists(Path.Combine(Application.dataPath, "Resources", "Models"));
+                if (missing)
                     Sync();
+                else if (CoreIsStale())
+                    Debug.LogWarning("Bullet Heaven: ../core has changed since Assets/Plugins/Core was built. Use Bullet Heaven > Sync core + models.");
             };
         }
 
@@ -72,12 +75,14 @@ namespace BulletHeaven.Unity.Editor
             return ok;
         }
 
+        private static string CoreDll => Path.Combine(Application.dataPath, "Plugins", "Core", "BulletHeaven.Core.dll");
+
         private static bool CoreIsStale()
         {
-            string dll = Path.Combine(Application.dataPath, "Plugins", "Core", "BulletHeaven.Core.dll");
-            if (!File.Exists(dll))
+            if (!File.Exists(CoreDll))
                 return true;
-            var built = File.GetLastWriteTimeUtc(dll);
+            // A minute's grace: after a git checkout sources and DLL get near-identical times.
+            var built = File.GetLastWriteTimeUtc(CoreDll).AddMinutes(1);
             foreach (var source in Directory.GetFiles(Path.Combine(RepoRoot, "core"), "*.cs", SearchOption.AllDirectories))
             {
                 if (!source.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar) && File.GetLastWriteTimeUtc(source) > built)

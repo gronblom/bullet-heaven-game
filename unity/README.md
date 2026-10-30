@@ -11,16 +11,15 @@ gameplay: the Arch ECS components and systems, the levels and the tests live in 
 2. Unity Hub: **Add > Add project from disk** and pick this `unity` folder. Open it with Unity 6 (LTS).
    Unity creates the rest of the project files and downloads the packages (URP, glTFast).
 3. On first open, the editor script `Assets/Editor/Setup.cs` runs by itself:
-   - builds `../core` and copies the DLLs into `Assets/Plugins/Core` (Arch and its helpers included),
    - copies `../assets/models/*.glb` and `../assets/textures/*.jpg` into `Assets/Resources`,
    - creates a URP asset if the project has no render pipeline yet,
    - switches Active Input Handling to *Both* if only the new Input System was on (then restart Unity).
-   Before that first sync the console shows errors about missing `BulletHeaven` types: those are
-   expected, and go once the DLLs are in.
+   The shared core is already there as DLLs in `Assets/Plugins/Core` (committed, built from `../core`).
+   If Unity opened in Safe Mode earlier, exit Safe Mode.
 4. Press **Play** in any scene. The game creates its own camera, light and post-processing.
 
 After changing anything in `../core` or regenerating models, use **Bullet Heaven > Sync core + models**
-(the core is also rebuilt automatically when Unity reloads and the sources are newer than the DLL).
+(Unity warns in the console when `../core` is newer than the DLLs), and commit the updated DLLs.
 
 ## Command line
 
