@@ -56,8 +56,10 @@ Shift/Ctrl or B to drift, Space or Y to jump.
   arrives every 30 s.
 - **XP gems** with magnet pickup; level-ups unlock the wand and the mortar, then level up a
   weapon or give a passive (damage, fire rate, running shoes, heavy boots, magnet, repair).
-- **Look**: baked PBR models and textures, narrow FOV + near/far depth of field (tilt-shift),
-  soft shadows, SSAO, screen-space bounce light and reflections.
+- **Look**: baked PBR models and textures, oak floorboards, narrow FOV + near/far depth of field
+  (tilt-shift), soft sun shadows, real-time global illumination (SDFGI), SSAO, screen-space
+  reflections, AgX tone mapping. If it runs slowly on your GPU, turn off `SdfgiEnabled` in
+  `Main.BuildEnvironment` first.
 
 ## 3D models
 
@@ -87,10 +89,11 @@ of the script: shapes plus a material recipe.
 | `minigun.glb`, `wand.glb` | weapons in the runner's hands (the minigun's `Barrels` part spins) |
 | `strawberry.glb`, `orange.glb`, `banana.glb`, `cherries.glb` | fruit |
 | `gem.glb` | XP gems |
-| `counter.glb`, `stool.glb`, `cutting_board.glb`, `toy_block.glb` | the kitchen counter and the ways up (blocks are tinted in game) |
+| `counter.glb`, `stool.glb`, `cutting_board.glb`, `toy_block.glb` | the kitchen counter (butcher-block top, navy cabinets) and the ways up (blocks are tinted in game) |
+| `back_counter.glb`, `fridge.glb` | cabinets and fridge along the back wall |
 | `mug_white.glb`, `mug_red.glb`, `apple.glb`, `book_blue.glb`, `book_gold.glb`, `cereal_box.glb`, `pencil.glb` | props on the counter |
 | `ball.glb`, `dog_bowl.glb` | floor props |
-| `textures/floor_*.png` | tiled floor |
+| `textures/floor_*.jpg` | oak floorboards (a seamless 16 x 16 patch; `shaders/floor.gdshader` hides the repeat) |
 
 **Using your own models instead** (for example AI-generated ones): export a `.glb` with the same
 name and replace the file. Bugs, the runner and gems are auto-fitted (scaled, centred, stood on the

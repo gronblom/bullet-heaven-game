@@ -366,6 +366,42 @@ class Mat:
         self.links.new(vector or self.coords, n.inputs["Vector"])
         return n.outputs["Fac"]
 
+    def seamless_noise(self, period, freq=(1.0, 1.0), detail=4.0, roughness=0.5, distortion=0.0, x=None, y=None, extra=None):
+        """Noise over the XY plane that repeats every `period` units in X and Y (the plane is wrapped onto
+        a 4D torus), so baked textures tile without seams. freq: features per unit along X and Y."""
+        x = x if x is not None else self.axis("X")
+        y = y if y is not None else self.axis("Y")
+        k = 2 * math.pi / period
+        rx, ry = freq[0] * period / (2 * math.pi), freq[1] * period / (2 * math.pi)
+        ax, ay = self.math("MULTIPLY", x, k), self.math("MULTIPLY", y, k)
+        combine = self.nodes.new("ShaderNodeCombineXYZ")
+        self.links.new(self.math("MULTIPLY", self.math("COSINE", ax), rx), combine.inputs[0])
+        self.links.new(self.math("MULTIPLY", self.math("SINE", ax), rx), combine.inputs[1])
+        cy = self.math("MULTIPLY", self.math("COSINE", ay), ry)
+        self.links.new(self.math("ADD", cy, extra) if extra is not None else cy, combine.inputs[2])
+        n = self.nodes.new("ShaderNodeTexNoise")
+        n.noise_dimensions = "4D"
+        self.links.new(combine.outputs[0], n.inputs["Vector"])
+        self.links.new(self.math("MULTIPLY", self.math("SINE", ay), ry), n.inputs["W"])
+        n.inputs["Scale"].default_value = 1.0
+        n.inputs["Detail"].default_value = detail
+        n.inputs["Roughness"].default_value = roughness
+        n.inputs["Distortion"].default_value = distortion
+        return n.outputs["Fac"]
+
+    def random(self, a, b=0.0):
+        """Stable pseudo-random 0..1 for integer cell coordinates (a, b): per plank, per strip, ..."""
+        combine = self.nodes.new("ShaderNodeCombineXYZ")
+        for i, value in enumerate((a, b)):
+            if isinstance(value, bpy.types.NodeSocket):
+                self.links.new(value, combine.inputs[i])
+            else:
+                combine.inputs[i].default_value = value
+        n = self.nodes.new("ShaderNodeTexWhiteNoise")
+        n.noise_dimensions = "3D"
+        self.links.new(combine.outputs[0], n.inputs["Vector"])
+        return n.outputs["Value"]
+
     def voronoi(self, scale=5.0, vector=None, output="Distance"):
         n = self.nodes.new("ShaderNodeTexVoronoi")
         n.inputs["Scale"].default_value = scale
@@ -781,12 +817,12 @@ def build_beetle():
     stripes = shell.wave("BANDS", "X", scale=9.0)  # lengthwise grooves along the wing cases
     var = shell.noise(scale=4.0, detail=5.0)
     seam = shell.math("LESS_THAN", shell.math("ABSOLUTE", shell.axis("X")), 0.012)
-    base = shell.ramp(var, [(0.3, (0.02, 0.16, 0.08)), (0.7, (0.08, 0.38, 0.18))])
-    shell.color(shell.mix(seam, base, (0.01, 0.03, 0.02)))
+    base = shell.ramp(var, [(0.3, (0.16, 0.05, 0.02)), (0.7, (0.42, 0.17, 0.06))])  # copper-bronze
+    shell.color(shell.mix(seam, base, (0.03, 0.01, 0.005)))
     shell.metal(0.8)
     shell.roughness(shell.gray(var, 0.12, 0.3))
     shell.normal(shell.bump(stripes, strength=0.25, distance=0.01, previous=shell.bump(seam, strength=0.6, distance=0.02)))
-    body = chitin("beetle_body", (0.02, 0.025, 0.02), (0.08, 0.1, 0.08), rough=0.3)
+    body = chitin("beetle_body", (0.02, 0.015, 0.012), (0.08, 0.05, 0.04), rough=0.3)
 
     h = 0.3
     elytra = sphere("elytra", 0.42, (0, 0.15, h + 0.05), (1.0, 1.45, 0.62), 28, 16)
@@ -990,9 +1026,19 @@ def build_orange():
                           previous=peel.bump(peel.noise(scale=1.5, detail=2.0), strength=0.1, distance=0.05)))
     peel.set(("Subsurface Weight", "Subsurface"), 0.1)
     fruit = sphere("orange", 3.5, (0, 0, 3.3), (1.0, 1.0, 0.94), 48, 32)
-    button = cylinder("button", 0.35, 0.15, (0, 0, 6.6), vertices=10)
-    stem_mat = leaf_material("orange_button", (0.3, 0.3, 0.08))
-    obj = join([with_material(fruit, peel.mat), with_material(button, stem_mat.mat)], "orange")
+    top = max(v.co.z for v in fruit.data.vertices)
+    deform(fruit, lambda v: Vector((v.x, v.y, v.z - 0.25 * math.exp(-(v.x * v.x + v.y * v.y) / 0.5) if v.z > 3.3 else v.z)))
+    calyx_mat = Mat("orange_calyx")
+    calyx_mat.color(calyx_mat.ramp(calyx_mat.noise(scale=20.0), [(0.3, (0.12, 0.13, 0.04)), (0.7, (0.3, 0.28, 0.1))]))
+    calyx_mat.roughness(0.75)
+    calyx_mat.normal(calyx_mat.bump(calyx_mat.noise(scale=60.0), strength=0.4, distance=0.01))
+    parts = [with_material(fruit, peel.mat)]
+    for i in range(5):  # five dried sepals in a star
+        angle = i * math.tau / 5
+        parts.append(with_material(sphere(f"sepal{i}", 0.22, (math.cos(angle) * 0.2, math.sin(angle) * 0.2, top - 0.22),
+                                          (1.0, 0.55, 0.18), 10, 6, rot=(0, 0, angle)), calyx_mat))
+    parts.append(with_material(cylinder("nub", 0.09, 0.22, (0, 0, top - 0.08), vertices=8, radius_top=0.07), calyx_mat))
+    obj = join(parts, "orange")
     return [bake(ground_and_center(obj), 2048)]
 
 
@@ -1215,26 +1261,37 @@ def build_cutting_board():
     return [bake(with_material(board, board_wood.mat), 1024)]
 
 
-def build_counter():
-    """Kitchen island: 52 x 26 cabinets, 10 tall with a 53 x 27 marble top. Origin at the bottom centre."""
-    marble = Mat("marble")
-    veins = marble.wave("BANDS", "X", scale=0.35, distortion=14.0, detail=10.0, vector=marble.vec(scale=(1, 0.6, 1)))
-    cloud = marble.noise(scale=0.6, detail=6.0)
-    vein_line = marble.math("LESS_THAN", marble.math("ABSOLUTE", marble.math("SUBTRACT", veins, 0.5)), 0.035)
-    base = marble.ramp(cloud, [(0.3, (0.82, 0.82, 0.8)), (0.7, (0.95, 0.95, 0.93))])
-    marble.color(marble.mix(marble.math("MULTIPLY", vein_line, 0.7), base, (0.35, 0.35, 0.38)))
-    marble.roughness(marble.gray(cloud, 0.06, 0.14))
-    marble.normal(marble.bump(vein_line, strength=0.05, distance=0.01))
-    cabinet = painted("cabinet_paint", (0.42, 0.55, 0.5), rough=0.45)
-    door = painted("door_paint", (0.47, 0.6, 0.55), rough=0.4)
-    plinth = plastic("plinth", (0.12, 0.13, 0.13), rough=0.6)
-    steel = metal("handle_steel", rough=0.2)
+def butcher_block(name):
+    """End-to-end oak strips glued into a worktop: each strip its own tone, grain along X."""
+    m = Mat(name)
+    y = m.axis("Y")
+    strip = m.math("FLOOR", m.math("DIVIDE", y, 1.2))
+    tone = m.random(strip)
+    grain = m.noise(scale=1.0, detail=6.0, distortion=0.4, vector=m.vec(scale=(0.25, 6.0, 6.0)))
+    flecks = m.noise(scale=1.0, detail=2.0, vector=m.vec(scale=(1.5, 30.0, 30.0)))
+    base = m.ramp(grain, [(0.25, (0.12, 0.055, 0.02)), (0.75, (0.36, 0.19, 0.08))])  # dark oiled walnut-oak
+    base = m.mix(m.math("MULTIPLY", tone, 0.55), base, (0.09, 0.045, 0.018))
+    joint = m.math("LESS_THAN", m.math("ABSOLUTE", m.math("SUBTRACT", m.math("FRACT", m.math("DIVIDE", y, 1.2)), 0.5)), 0.49)
+    m.color(m.mix(m.math("SUBTRACT", 1.0, joint), m.mix(m.math("MULTIPLY", flecks, 0.25), base, (0.2, 0.1, 0.04)), (0.1, 0.05, 0.02)))
+    m.roughness(m.gray(m.noise(scale=0.5, detail=3.0), 0.3, 0.55))  # oiled, worn in places
+    m.normal(m.bump(flecks, strength=0.12, distance=0.01, previous=m.bump(joint, strength=0.3, distance=0.01)))
+    return m
 
-    w, d, h = 52.0, 26.0, 10.0
+
+def build_counter(name="counter", w=52.0, d=26.0, doors_long=6, doors_short=3, texture=2048):
+    """Kitchen cabinets w x d, 10 tall, with a butcher-block top overhanging by 0.5 all round.
+    Navy painted doors with raised panels and brass bar handles. Origin at the bottom centre."""
+    top_mat = butcher_block(f"{name}_top")
+    cabinet = painted(f"{name}_paint", (0.07, 0.1, 0.17), rough=0.45)
+    door = painted(f"{name}_door", (0.1, 0.14, 0.24), rough=0.4)
+    plinth = plastic(f"{name}_plinth", (0.05, 0.05, 0.06), rough=0.6)
+    brass = metal(f"{name}_brass", (0.8, 0.58, 0.28), rough=0.25)
+
+    h = 10.0
     parts = [
-        with_material(box("carcass", (w, d, h - 0.6 - 0.6), (0, 0, 0.6 + (h - 1.2) / 2)), cabinet.mat),
+        with_material(box("carcass", (w, d, h - 0.8 - 0.6), (0, 0, 0.6 + (h - 1.4) / 2)), cabinet.mat),
         with_material(box("plinth", (w - 0.8, d - 0.8, 0.6), (0, 0, 0.3)), plinth.mat),
-        with_material(box("top", (w + 1, d + 1, 0.6), (0, 0, h - 0.3), bevel=0.1, segments=3), marble.mat),
+        with_material(box("top", (w + 1, d + 1, 0.8), (0, 0, h - 0.4), bevel=0.12, segments=3), top_mat.mat),
     ]
 
     def doors(count, length, along_x, offset, sign):
@@ -1242,62 +1299,129 @@ def build_counter():
             t = -length / 2 + length / count * (i + 0.5)
             size_along = length / count - 0.5
             center = (t, sign * offset, 4.8) if along_x else (sign * offset, t, 4.8)
-            size = (size_along, 0.25, 7.6) if along_x else (0.25, size_along, 7.6)
+            size = (size_along, 0.25, 7.4) if along_x else (0.25, size_along, 7.4)
             parts.append(with_material(box(f"door{along_x}{sign}{i}", size, center, bevel=0.08, segments=2), door.mat))
             # Raised inner panel.
-            inner = (size_along - 1.4, 0.15, 6.0) if along_x else (0.15, size_along - 1.4, 6.0)
+            inner = (size_along - 1.4, 0.15, 5.8) if along_x else (0.15, size_along - 1.4, 5.8)
             inner_center = (center[0], center[1] + sign * 0.15, 4.8) if along_x else (center[0] + sign * 0.15, center[1], 4.8)
             parts.append(with_material(box(f"panel{along_x}{sign}{i}", inner, inner_center, bevel=0.15, segments=2), door.mat))
-            # Bar handle near the top edge of each door.
+            # Brass bar handle near the top edge of each door.
             hx = center[0] + (size_along / 2 - 0.8 if along_x else sign * 0.5)
             hy = center[1] + (sign * 0.5 if along_x else size_along / 2 - 0.8)
-            parts.append(with_material(cylinder(f"handle{along_x}{sign}{i}", 0.15, 1.8, (hx, hy, 6.8), vertices=12), steel.mat))
+            parts.append(with_material(cylinder(f"handle{along_x}{sign}{i}", 0.15, 1.8, (hx, hy, 6.6), vertices=12), brass.mat))
 
-    doors(6, w - 1, True, d / 2 + 0.12, 1)
-    doors(6, w - 1, True, d / 2 + 0.12, -1)
-    doors(3, d - 1, False, w / 2 + 0.12, 1)
-    doors(3, d - 1, False, w / 2 + 0.12, -1)
-    return [bake(join(parts, "counter"), 2048)]
+    doors(doors_long, w - 1, True, d / 2 + 0.12, 1)
+    doors(doors_long, w - 1, True, d / 2 + 0.12, -1)
+    doors(doors_short, d - 1, False, w / 2 + 0.12, 1)
+    doors(doors_short, d - 1, False, w / 2 + 0.12, -1)
+    return [bake(join(parts, name), texture)]
+
+
+def build_fridge():
+    """Stainless steel fridge-freezer, 24 wide (X) x 20 deep (Y) x 45 tall, doors facing -Y. Origin at bottom centre."""
+    steel = metal("fridge_steel", (0.72, 0.73, 0.75), rough=0.3, brushed_axis="Z")
+    dark = plastic("fridge_gasket", (0.04, 0.04, 0.045), rough=0.6)
+    handle_steel = metal("fridge_handle", (0.85, 0.86, 0.88), rough=0.15)
+    w, d, h = 24.0, 20.0, 45.0
+    split = 30.0  # freezer below, fridge above
+    parts = [
+        with_material(box("body", (w, d - 1.0, h), (0, 0.5, h / 2), bevel=0.3, segments=3), steel),
+        with_material(box("freezer_door", (w - 0.4, 1.0, split - 1.2), (0, -d / 2 + 0.5, 0.8 + (split - 1.2) / 2), bevel=0.25, segments=3), steel),
+        with_material(box("fridge_door", (w - 0.4, 1.0, h - split - 0.6), (0, -d / 2 + 0.5, split + (h - split - 0.6) / 2), bevel=0.25, segments=3), steel),
+        with_material(box("gap", (w - 0.2, 0.9, 0.35), (0, -d / 2 + 0.55, split - 0.2)), dark),
+        with_material(box("kick", (w - 1.0, 0.6, 0.8), (0, -d / 2 + 0.6, 0.4)), dark),
+    ]
+    for z0, z1 in ((split + 2.0, h - 2.0), (3.0, split - 3.0)):
+        x = w / 2 - 2.5
+        parts.append(with_material(tube(f"handle{z0}", [(x, -d / 2 - 0.1, z0), (x, -d / 2 - 1.1, z0 + 0.6),
+                                                       (x, -d / 2 - 1.1, z1 - 0.6), (x, -d / 2 - 0.1, z1)],
+                                        [0.3, 0.3, 0.3, 0.3], smooth_curve=False, sides=12), handle_steel))
+    return [bake(join(parts, "fridge"), 2048)]
 
 
 def build_floor_textures():
-    """Tileable 8 x 8 unit patch (2 x 2 tiles of 4 units) baked into textures/floor_*.png."""
-    tiles = Mat("floor")
-    x, y = tiles.axis("X"), tiles.axis("Y")
-    fx = tiles.math("FRACT", tiles.math("DIVIDE", x, 4.0))
-    fy = tiles.math("FRACT", tiles.math("DIVIDE", y, 4.0))
-    edge = tiles.math("MINIMUM", tiles.math("MINIMUM", fx, tiles.math("SUBTRACT", 1.0, fx)),
-                      tiles.math("MINIMUM", fy, tiles.math("SUBTRACT", 1.0, fy)))
-    grout = tiles.math("LESS_THAN", edge, 0.02)
-    parity = tiles.math("MODULO", tiles.math("ADD", tiles.math("FLOOR", tiles.math("DIVIDE", x, 4.0)),
-                                             tiles.math("FLOOR", tiles.math("DIVIDE", y, 4.0))), 2.0)
-    parity = tiles.math("ABSOLUTE", parity)
-    cloud = tiles.noise(scale=0.8, detail=6.0)
-    light = tiles.ramp(cloud, [(0.3, (0.55, 0.52, 0.46)), (0.7, (0.64, 0.6, 0.53))])
-    dark = tiles.ramp(cloud, [(0.3, (0.18, 0.22, 0.24)), (0.7, (0.25, 0.29, 0.31))])
-    tile_color = tiles.mix(parity, light, dark)
-    tiles.color(tiles.mix(grout, tile_color, (0.3, 0.28, 0.25)))
-    tiles.roughness(tiles.mix(grout, tiles.gray(cloud, 0.12, 0.3), (0.85, 0.85, 0.85)))
-    tiles.normal(tiles.bump(tiles.math("SUBTRACT", 1.0, grout), strength=0.6, distance=0.03,
-                            previous=tiles.bump(tiles.noise(scale=6.0), strength=0.05, distance=0.01)))
-    bpy.ops.mesh.primitive_plane_add(size=8, location=(4, 4, 0))
+    """Seamless 16 x 16 unit patch of oak floorboards (rows 2 wide, boards 16 long, staggered), baked
+    into textures/floor_*.jpg. Every board gets its own tone and grain, with small gaps between."""
+    period, row_width, board_length = 16.0, 2.0, 16.0
+    f = Mat("floor")
+    x = f.math("ADD", f.axis("X"), period / 2)  # patch spans 0..16 in both axes
+    y = f.math("ADD", f.axis("Y"), period / 2)
+    row = f.math("FLOOR", f.math("DIVIDE", y, row_width))
+    row_id = f.math("MODULO", row, period / row_width)
+    stagger = f.math("MULTIPLY", f.random(row_id, 7.0), board_length)
+    along_x = f.math("DIVIDE", f.math("ADD", x, stagger), board_length)
+    board_id = f.math("MODULO", f.math("FLOOR", along_x), period / board_length)  # repeats with the patch
+    tone = f.random(row_id, board_id)
+    along = f.math("FRACT", along_x)
+    across = f.math("FRACT", f.math("DIVIDE", y, row_width))
+    gap_side = f.math("LESS_THAN", f.math("MINIMUM", across, f.math("SUBTRACT", 1.0, across)), 0.012)
+    gap_end = f.math("LESS_THAN", f.math("MINIMUM", along, f.math("SUBTRACT", 1.0, along)), 0.0015)
+    gap = f.math("MAXIMUM", gap_side, gap_end)
+
+    # Long grain along each board (stretched along X), shifted per board so neighbours differ.
+    shift = f.math("MULTIPLY", tone, 37.0)
+    grain = f.seamless_noise(period, freq=(0.12, 2.5), detail=8.0, roughness=0.6, distortion=0.3, x=x, y=y, extra=shift)
+    fine = f.seamless_noise(period, freq=(0.6, 18.0), detail=3.0, x=x, y=y, extra=shift)
+    oak = f.ramp(grain, [(0.25, (0.12, 0.06, 0.025)), (0.5, (0.25, 0.14, 0.06)), (0.75, (0.4, 0.24, 0.11))])
+    oak = f.mix(f.math("MULTIPLY", fine, 0.45), oak, (0.1, 0.05, 0.02))
+    board = f.mix(f.math("MULTIPLY", tone, 0.4), oak, (0.42, 0.27, 0.13))        # lighter boards
+    board = f.mix(f.math("MULTIPLY", f.math("SUBTRACT", 1.0, tone), 0.35), board, (0.09, 0.05, 0.02))  # and darker ones
+    f.color(f.mix(gap, board, (0.04, 0.025, 0.015)))
+
+    # Satin lacquer, scuffed in big soft patches; gaps are dull.
+    wear = f.seamless_noise(period, freq=(0.25, 0.25), detail=4.0, x=x, y=y)
+    f.roughness(f.mix(gap, f.gray(wear, 0.22, 0.55), (0.9, 0.9, 0.9)))
+    edges = f.math("MAXIMUM", f.math("LESS_THAN", f.math("MINIMUM", across, f.math("SUBTRACT", 1.0, across)), 0.03),
+                   f.math("LESS_THAN", f.math("MINIMUM", along, f.math("SUBTRACT", 1.0, along)), 0.003))
+    f.normal(f.bump(f.math("SUBTRACT", 1.0, edges), strength=0.5, distance=0.02,
+                    previous=f.bump(fine, strength=0.15, distance=0.01)))
+
+    bpy.ops.mesh.primitive_plane_add(size=period, location=(0, 0, 0))
     plane = bpy.context.active_object
     plane.name = "floor"
-    with_material(plane, tiles.mat)
+    with_material(plane, f.mat)
 
     folder = os.path.join(ARGS.out, "textures")
     os.makedirs(folder, exist_ok=True)
-    size = max(64, int(1024 * TEX_SCALE))
+    size = max(64, int(2048 * TEX_SCALE))
     for suffix, kind, socket, space in (("albedo", "EMIT", "Base Color", "sRGB"), ("roughness", "EMIT", "Roughness", "Non-Color"),
                                         ("normal", "NORMAL", None, "Non-Color")):
         image = bpy.data.images.new(f"floor_{suffix}", size, size, alpha=False)
         image.colorspace_settings.name = space
         _bake_pass(plane, image, kind, socket=socket)
-        image.filepath_raw = os.path.join(folder, f"floor_{suffix}.png")
-        image.file_format = "PNG"
+        image.filepath_raw = os.path.join(folder, f"floor_{suffix}.jpg")
+        image.file_format = "JPEG"
         image.save()
-        print(f"  wrote textures/floor_{suffix}.png")
+        print(f"  wrote textures/floor_{suffix}.jpg")
+    if ARGS.preview:
+        render_floor_preview(plane)
     return None
+
+
+def render_floor_preview(plane):
+    """View across the baked floor (repeated 3 x 3) to judge it and check the seams."""
+    baked = bpy.data.materials.new("floor_baked")
+    baked.use_nodes = True
+    nodes, links = baked.node_tree.nodes, baked.node_tree.links
+    bsdf = nodes["Principled BSDF"]
+    mapping = nodes.new("ShaderNodeMapping")
+    links.new(nodes.new("ShaderNodeTexCoord").outputs["UV"], mapping.inputs["Vector"])
+    mapping.inputs["Scale"].default_value = (3, 3, 1)
+
+    def tex(name):
+        t = nodes.new("ShaderNodeTexImage")
+        t.image = bpy.data.images[name]
+        links.new(mapping.outputs["Vector"], t.inputs["Vector"])
+        return t
+
+    links.new(tex("floor_albedo").outputs["Color"], bsdf.inputs["Base Color"])
+    links.new(tex("floor_roughness").outputs["Color"], bsdf.inputs["Roughness"])
+    normal_map = nodes.new("ShaderNodeNormalMap")
+    links.new(tex("floor_normal").outputs["Color"], normal_map.inputs["Color"])
+    links.new(normal_map.outputs["Normal"], bsdf.inputs["Normal"])
+    plane.scale = (3, 3, 1)
+    with_material(plane, baked)
+    render_preview([plane], "floor")
 
 
 MODELS = {
@@ -1324,6 +1448,8 @@ MODELS = {
     "pencil": build_pencil,
     "cutting_board": build_cutting_board,
     "counter": build_counter,
+    "back_counter": lambda: build_counter("back_counter", 120.0, 10.0, 14, 1),
+    "fridge": build_fridge,
     "floor": build_floor_textures,
 }
 

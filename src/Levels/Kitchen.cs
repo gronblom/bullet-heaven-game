@@ -43,20 +43,25 @@ public static class Kitchen
 
         public void Room()
         {
-            // Tiles: baked textures cover 2 x 2 tiles (8 units); fall back to a plain checker.
+            // Oak floorboards: baked textures cover a seamless 16 x 16 patch, drawn with a shader that
+            // breaks up the repeat. Falls back to a plain checker if the textures are missing.
             var tileRepeat = new Vector3(Bounds.Size.X / 8f, Bounds.Size.Y / 8f, 1f);
-            StandardMaterial3D floor;
-            if (ModelLibrary.LoadTexture("floor_albedo.png") is { } albedo)
+            Material floor;
+            if (ModelLibrary.LoadTexture("floor_albedo.jpg") is { } albedo)
             {
-                floor = new StandardMaterial3D
+                var boards = new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/floor.gdshader") };
+                boards.SetShaderParameter("albedo_texture", albedo);
+                boards.SetShaderParameter("roughness_texture", ModelLibrary.LoadTexture("floor_roughness.jpg"));
+                boards.SetShaderParameter("normal_texture", ModelLibrary.LoadTexture("floor_normal.jpg"));
+                boards.SetShaderParameter("repeats", Bounds.Size / 16f);
+                boards.SetShaderParameter("variation_texture", new NoiseTexture2D
                 {
-                    AlbedoTexture = albedo,
-                    NormalEnabled = true,
-                    NormalTexture = ModelLibrary.LoadTexture("floor_normal.png"),
-                    RoughnessTexture = ModelLibrary.LoadTexture("floor_roughness.png"),
-                    Roughness = 1f,
-                    Uv1Scale = tileRepeat,
-                };
+                    Width = 256,
+                    Height = 256,
+                    Seamless = true,
+                    Noise = new FastNoiseLite { Frequency = 0.012f, FractalOctaves = 3 },
+                });
+                floor = boards;
             }
             else
             {
@@ -76,7 +81,7 @@ public static class Kitchen
             Add(new PlaneMesh { Size = Bounds.Size }, new Vector3(Bounds.GetCenter().X, 0f, Bounds.GetCenter().Y), floor);
 
             // Walls behind and to the sides; only a skirting board on the camera side.
-            var wall = Materials.Plastic(new Color(0.72f, 0.66f, 0.56f), 0.9f);
+            var wall = Materials.Plastic(new Color(0.55f, 0.48f, 0.4f), 0.9f);
             float w = Bounds.Size.X + 4f, d = Bounds.Size.Y + 4f;
             Add(new BoxMesh { Size = new Vector3(w, 50f, 2f) }, new Vector3(0f, 25f, Bounds.Position.Y - 1f), wall);
             Add(new BoxMesh { Size = new Vector3(2f, 50f, d) }, new Vector3(Bounds.Position.X - 1f, 25f, 0f), wall);
@@ -85,11 +90,17 @@ public static class Kitchen
             Add(new BoxMesh { Size = new Vector3(30f, 16f, 0.3f) }, new Vector3(10f, 26f, Bounds.Position.Y + 0.2f),
                 Materials.Glow(new Color(0.85f, 0.93f, 1f), 1.2f)); // window
 
-            // Fridge and a row of cabinets along the back wall.
-            var fridge = Materials.Plastic(new Color(0.92f, 0.93f, 0.95f), 0.2f);
-            Solid(new Vector2(-66f, -45f), new Vector2(24f, 20f), 45f, fridge);
-            var cabinets = Materials.Plastic(new Color(0.42f, 0.55f, 0.5f), 0.6f);
-            Solid(new Vector2(10f, -50f), new Vector2(120f, 10f), CounterTop, cabinets);
+            // Fridge and a row of cabinets along the back wall (models when generated).
+            var fridgeAt = new Vector2(-66f, -45f);
+            if (Model("fridge", new Vector3(fridgeAt.X, 0f, fridgeAt.Y), new Vector3(24f, 45f, 20f)) == null)
+                Solid(fridgeAt, new Vector2(24f, 20f), 45f, Materials.Plastic(new Color(0.92f, 0.93f, 0.95f), 0.2f));
+            else
+                AddObstacle(fridgeAt, new Obstacle { Shape = ObstacleShape.Box, HalfExtents = new Vector2(12f, 10f), Height = 45f });
+            var backAt = new Vector2(10f, -50f);
+            if (Model("back_counter", new Vector3(backAt.X, 0f, backAt.Y), new Vector3(121f, CounterTop, 11f)) == null)
+                Solid(backAt, new Vector2(120f, 10f), CounterTop, Materials.Plastic(new Color(0.1f, 0.14f, 0.24f), 0.6f));
+            else
+                AddObstacle(backAt, new Obstacle { Shape = ObstacleShape.Box, HalfExtents = new Vector2(60f, 5f), Height = CounterTop });
         }
 
         public void KitchenCounter()

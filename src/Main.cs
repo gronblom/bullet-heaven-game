@@ -21,7 +21,7 @@ public partial class Main : Node3D
 
     private static readonly Vector3 CameraOffset = new(0f, 32f, 18f);
     private static readonly Color AntColor = new(0.45f, 0.08f, 0.05f);
-    private static readonly Color BeetleColor = new(0.1f, 0.3f, 0.25f);
+    private static readonly Color BeetleColor = new(0.35f, 0.15f, 0.06f);
 
     private static readonly QueryDescription EnemyQuery = new QueryDescription().WithAll<Enemy, Position, Velocity, Radius, Elevation>();
     private static readonly QueryDescription BulletQuery = new QueryDescription().WithAll<Bullet, Position, Velocity>();
@@ -327,9 +327,13 @@ public partial class Main : Node3D
                 },
             },
             AmbientLightSource = Godot.Environment.AmbientSource.Sky,
-            AmbientLightEnergy = 0.5f,
-            TonemapMode = Godot.Environment.ToneMapper.Filmic,
-            TonemapExposure = 0.95f,
+            AmbientLightEnergy = 0.45f,
+            // AgX handles bright highlights and saturated colours more like a camera does.
+            TonemapMode = Godot.Environment.ToneMapper.Agx,
+            TonemapExposure = 1.0f,
+            // Real-time global illumination: light bounces off the floor, counter and walls.
+            SdfgiEnabled = true,
+            SdfgiUseOcclusion = true,
             SsaoEnabled = true,
             SsaoIntensity = 2.5f,
             SsilEnabled = true, // bounce light from nearby surfaces
@@ -337,8 +341,8 @@ public partial class Main : Node3D
             GlowEnabled = true,
             // Richer, warmer colours (Pikmin 4 style): more saturation and contrast.
             AdjustmentEnabled = true,
-            AdjustmentSaturation = 1.25f,
-            AdjustmentContrast = 1.08f,
+            AdjustmentSaturation = 1.15f,
+            AdjustmentContrast = 1.05f,
         };
         AddChild(new WorldEnvironment { Environment = environment });
 
@@ -346,8 +350,11 @@ public partial class Main : Node3D
         {
             RotationDegrees = new Vector3(-55f, 35f, 0f),
             LightColor = new Color(1f, 0.9f, 0.75f),
-            LightEnergy = 1.35f,
+            LightEnergy = 1.6f,
             ShadowEnabled = true,
+            // Soft shadows that get blurrier further from what casts them, like real sunlight.
+            LightAngularDistance = 1.5f,
+            ShadowBlur = 1.2f,
             DirectionalShadowMaxDistance = 80f,
         });
 
