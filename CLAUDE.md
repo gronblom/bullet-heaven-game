@@ -17,3 +17,6 @@
   fallback. In cloud sessions the Ubuntu `blender` package can't bake (outputs blank textures); use the
   official build via `pip install bpy` (needs Python 3.13) and run the script with that Python.
 - Keep the C# style: file-scoped namespaces, primary-constructor systems, XML summary on each type.
+- Levels derive from `src/Levels/Level.cs`. Put collision first and guard every visual step with `Visual`
+  (or use the helpers, which do): a level built with a null parent must yield collision only, so the
+  headless route tests can build it. Check new climbing routes with a bot run, steps <= ~1.8 high.

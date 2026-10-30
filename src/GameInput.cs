@@ -18,6 +18,8 @@ public static class GameInput
     public const string Restart = "restart";
     /// <summary>Number keys 1-3: add or level up the minigun, wand and mortar (for trying them out).</summary>
     public static readonly string[] DebugWeapons = { "debug_weapon_1", "debug_weapon_2", "debug_weapon_3" };
+    /// <summary>F1-F4: jump straight to a level (development).</summary>
+    public static readonly string[] Levels = { "level_1", "level_2", "level_3", "level_4" };
 
     public static void Register()
     {
@@ -34,6 +36,10 @@ public static class GameInput
         Add(DebugWeapons[0], Key(Godot.Key.Key1));
         Add(DebugWeapons[1], Key(Godot.Key.Key2));
         Add(DebugWeapons[2], Key(Godot.Key.Key3));
+        Add(Levels[0], Key(Godot.Key.F1));
+        Add(Levels[1], Key(Godot.Key.F2));
+        Add(Levels[2], Key(Godot.Key.F3));
+        Add(Levels[3], Key(Godot.Key.F4));
     }
 
     private static void Add(string action, params InputEvent[] events)

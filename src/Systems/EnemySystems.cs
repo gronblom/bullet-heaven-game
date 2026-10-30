@@ -56,9 +56,9 @@ public sealed class EnemySpawnSystem(World world, GameState state) : GameSystem(
         {
             float distance = 26f + (float)State.Rng.NextDouble() * 6f;
             point = (playerPos + Vector2.FromAngle(angle) * distance).Clamp(inner.Position, inner.End);
-            if (point.DistanceTo(playerPos) > 16f)
+            if (point.DistanceTo(playerPos) > 16f && State.Terrain.GroundHeight(point) < 15f)
                 break;
-            angle += 1.1f; // too close after clamping to the table edge, try elsewhere
+            angle += 1.1f; // too close after clamping to the room edge, or inside a tall wall: try elsewhere
         }
         return point;
     }

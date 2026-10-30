@@ -19,6 +19,12 @@ public partial class Main : Node3D
     /// <summary>Tick in the Inspector (select the Main node) to play as the toy car instead of the runner.</summary>
     [Export] public bool DriveCar { get; set; }
 
+    /// <summary>Level to start in (0 = Kitchen); F1-F4 switch levels while playing.</summary>
+    [Export] public int StartLevel { get; set; }
+
+    /// <summary>The level picked with F1-F4; survives the scene reload that switches levels.</summary>
+    private static int? _selectedLevel;
+
     private static readonly Vector3 CameraOffset = new(0f, 32f, 18f);
     private static readonly Color AntColor = new(0.45f, 0.08f, 0.05f);
     private static readonly Color BeetleColor = new(0.35f, 0.15f, 0.06f);
@@ -32,6 +38,7 @@ public partial class Main : Node3D
 
     private World _world;
     private GameState _state;
+    private Level _level;
     private GameSystem[] _systems;
 
     private CarView _carView;
@@ -54,15 +61,17 @@ public partial class Main : Node3D
     {
         GameInput.Register();
 
+        _level = Level.All[Math.Clamp(_selectedLevel ?? StartLevel, 0, Level.All.Length - 1)];
         _world = World.Create();
-        _state = new GameState(Kitchen.Bounds);
+        _state = new GameState(_level.Bounds);
         _fader = new OcclusionFader();
 
-        BuildEnvironment();
-        Kitchen.Build(this, _world, _fader);
-        _state.Terrain = Terrain.FromWorld(_world, Kitchen.Bounds);
+        var (environment, sun) = BuildEnvironment();
+        _level.Build(this, _world, _fader);
+        _level.Atmosphere(environment, sun, this);
+        _state.Terrain = Terrain.FromWorld(_world, _level.Bounds);
 
-        var start = Kitchen.PlayerStart;
+        var start = _level.PlayerStart;
         const float facingUp = -Mathf.Pi / 2f; // up the screen
         _state.Player = _world.Create(
             new PlayerTag(),
@@ -133,14 +142,24 @@ public partial class Main : Node3D
         };
 
         _cameraTarget = new Vector3(start.X, 0f, start.Y);
-        _state.ShowMessage(DriveCar
-            ? "Ram the bugs!\nWASD / arrows to drive, Shift to drift, Space to jump"
-            : "Stomp the bugs!\nWASD / arrows / stick to run, Space / A to jump\nClimb the stools or the toy blocks to reach the counter", 5f);
+        _state.ShowMessage($"{_level.Name}\n" + (DriveCar
+            ? "WASD / arrows to drive, Shift to drift, Space to jump"
+            : "WASD / arrows / stick to run, Space / A to jump") + "\nF1-F4: switch level", 5f);
     }
 
     public override void _Process(double delta)
     {
         float dt = Math.Min((float)delta, 1f / 20f); // avoid huge steps after hitches
+
+        for (int i = 0; i < GameInput.Levels.Length && i < Level.All.Length; i++)
+        {
+            if (Input.IsActionJustPressed(GameInput.Levels[i]))
+            {
+                _selectedLevel = i;
+                GetTree().ReloadCurrentScene();
+                return;
+            }
+        }
 
         if (_state.GameOver)
         {
@@ -214,7 +233,7 @@ public partial class Main : Node3D
         int enemyCount = DrawBugs();
         DrawProjectiles(dt);
 
-        _hud.Sync(_state, health, enemyCount, velocity.Value.Length(), weapons, dt);
+        _hud.Sync(_state, _level.Name, health, enemyCount, velocity.Value.Length(), weapons, dt);
     }
 
     private int DrawBugs()
@@ -311,7 +330,8 @@ public partial class Main : Node3D
         _blastRenderer.End();
     }
 
-    private void BuildEnvironment()
+    /// <summary>Default daylight look; each level's Atmosphere adjusts it.</summary>
+    private (Godot.Environment, DirectionalLight3D) BuildEnvironment()
     {
         var environment = new Godot.Environment
         {
@@ -346,7 +366,7 @@ public partial class Main : Node3D
         };
         AddChild(new WorldEnvironment { Environment = environment });
 
-        AddChild(new DirectionalLight3D
+        var sun = new DirectionalLight3D
         {
             RotationDegrees = new Vector3(-55f, 35f, 0f),
             LightColor = new Color(1f, 0.9f, 0.75f),
@@ -356,7 +376,8 @@ public partial class Main : Node3D
             LightAngularDistance = 1.5f,
             ShadowBlur = 1.2f,
             DirectionalShadowMaxDistance = 80f,
-        });
+        };
+        AddChild(sun);
 
         // Narrow field of view plus near/far depth-of-field blur = the "tilt-shift" miniature look.
         _camera = new Camera3D
@@ -377,5 +398,6 @@ public partial class Main : Node3D
         AddChild(_camera);
         _camera.LookAtFromPosition(CameraOffset, Vector3.Zero, Vector3.Up);
         _camera.MakeCurrent();
+        return (environment, sun);
     }
 }

@@ -18,7 +18,7 @@ public static class ModelLibrary
 {
     public const string Folder = "res://assets/models/";
 
-    public static readonly ModelSpec Runner = new("runner", Size: 1.5f, YawDegrees: 90f, FitHeight: true); // incl. antenna
+    public static readonly ModelSpec Runner = new("runner", Size: 1.35f, YawDegrees: 90f, FitHeight: true); // incl. hat
     public static readonly ModelSpec Car = new("car", Size: 1.4f, YawDegrees: 90f);
     public static readonly ModelSpec Ant = new("ant", Size: 1.4f, YawDegrees: 90f);       // incl. antennae
     public static readonly ModelSpec Beetle = new("beetle", Size: 1.3f, YawDegrees: 90f);

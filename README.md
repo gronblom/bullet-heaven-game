@@ -24,15 +24,33 @@ You can also compile without the editor: `dotnet build`.
 | Run | WASD / arrows | Left stick |
 | Jump (hold for higher) | Space | A or Y |
 | Try a weapon (debug: add / level up minigun, wand, mortar) | 1 / 2 / 3 | |
+| Switch level (debug) | F1 / F2 / F3 / F4 | |
 | Restart after getting squashed | R / Enter | Start |
 
 **Playing as the car instead:** select the `Main` node in `scenes/main.tscn` and tick **Drive Car**
 in the Inspector. Car controls: W/S or RT/LT to drive and brake, A/D or the stick to steer,
 Shift/Ctrl or B to drift, Space or Y to jump.
 
+## Levels
+
+Switch any time with **F1-F4** (or set `Start Level` on the `Main` node in the Inspector).
+
+| Key | Level | Mood | The way up |
+|---|---|---|---|
+| F1 | **Kitchen** | daylight, oak floor, butcher-block counter | stools + cutting board, or the toy-block staircase, to the counter (10) |
+| F2 | **The Study** | Indiana Jones: wood panelling, Persian rug, Chesterfield armchair, golden idol, globe, chest, candle and lamp light in dusty air | books -> footstool -> seat -> armrest -> chair back -> book towers -> desk (13) |
+| F3 | **The Backrooms** | liminal: endless yellow wallpaper, damp carpet, buzzing flickering tubes, thick haze | a staircase to nowhere (12.8) |
+| F4 | **80s Bedroom** | night: Memphis carpet, neon, lava lamp, CRT TV, boombox, cassettes, Rubik's cube | cassettes -> cube -> boombox -> bed -> nightstand (9.6) |
+
+Every climbing route is checked headless by building the real level's collision and running a
+bot along it. Each level is one class in `src/Levels/` built from the helpers in `Level.cs`.
+
+**Water**: glasses of water on the kitchen counter and the study desk use `shaders/water.gdshader`
+(screen-space refraction, depth tint, animated ripples, Fresnel sheen) inside refracting glass.
+
 ## Gameplay so far
 
-- **The kitchen**: the floor is the main arena. The counter in the middle (10 up) is high ground
+- **The kitchen** (level 1): the floor is the main arena. The counter in the middle (10 up) is high ground
   with mugs, books, a cereal box, an apple and pencils on it.
   - **Ways up**: a cutting board leaning on a stool (then jump to the counter), or the toy-block
     staircase (one jump per block). Ramps on the counter launch you, one of them right off the edge.
@@ -84,7 +102,7 @@ of the script: shapes plus a material recipe.
 
 | File | Used for |
 |---|---|
-| `runner.glb` | the player (separate `LegL/LegR/ArmL/ArmR` parts so the run cycle still animates) |
+| `runner.glb` | the player, a chibi explorer with a fedora (separate `LegL/LegR/ArmL/ArmR` parts so the run cycle still animates) |
 | `ant.glb`, `beetle.glb` | enemies (an `anim` vertex colour tags legs and antennae for the walk shader) |
 | `minigun.glb`, `wand.glb` | weapons in the runner's hands (the minigun's `Barrels` part spins) |
 | `strawberry.glb`, `orange.glb`, `banana.glb`, `cherries.glb` | fruit |
@@ -94,6 +112,9 @@ of the script: shapes plus a material recipe.
 | `mug_white.glb`, `mug_red.glb`, `apple.glb`, `book_blue.glb`, `book_gold.glb`, `cereal_box.glb`, `pencil.glb` | props on the counter |
 | `ball.glb`, `dog_bowl.glb` | floor props |
 | `textures/floor_*.jpg` | oak floorboards (a seamless 16 x 16 patch; `shaders/floor.gdshader` hides the repeat) |
+| `armchair`, `footstool`, `desk`, `idol`, `globe`, `chest`, `urn`, `candle`, `panel_wall`, `rug`, `book_red`, `book_green`, `textures/floor_walnut_*` | The Study |
+| `textures/wallpaper_*`, `textures/carpet_*` | The Backrooms |
+| `bed`, `rubiks_cube`, `crt_tv`, `cassette`, `boombox`, `lava_lamp`, `textures/memphis_*` | 80s Bedroom |
 
 **Using your own models instead** (for example AI-generated ones): export a `.glb` with the same
 name and replace the file. Bugs, the runner and gems are auto-fitted (scaled, centred, stood on the
@@ -117,7 +138,7 @@ src/
   Systems/             One class per behaviour, run in a fixed order from Main
   Rendering/           MultiMesh batches, runner/car views, model loading, occlusion fading
 tools/blender/         generate_models.py: builds and bakes every model
-  Levels/              Level builders (Kitchen)
+  Levels/              Level base class + Kitchen, Study, Backrooms, Bedroom80s
   Ecs/Terrain.cs       Ground height + walls from Obstacle/Ramp entities
 ```
 

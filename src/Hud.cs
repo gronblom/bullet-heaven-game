@@ -34,7 +34,7 @@ public sealed partial class Hud : CanvasLayer
         _stats.AddThemeColorOverride("font_outline_color", Colors.Black);
     }
 
-    public void Sync(GameState state, in Health health, int enemies, float speed,
+    public void Sync(GameState state, string level, in Health health, int enemies, float speed,
         List<(WeaponKind Kind, int Level, float Spin)> weapons, float dt)
     {
         _health.MaxValue = health.Max;
@@ -43,7 +43,7 @@ public sealed partial class Hud : CanvasLayer
         _xp.Value = state.Xp;
 
         int seconds = (int)state.Time;
-        _stats.Text = $"Level {state.Level}   Kills {state.Kills}\n" +
+        _stats.Text = $"{level}  (F1-F4)\nLevel {state.Level}   Kills {state.Kills}\n" +
                       $"Time {seconds / 60}:{seconds % 60:00}   Speed {speed:0}\n" +
                       $"Enemies {enemies}   FPS {Engine.GetFramesPerSecond()}" + WeaponList(weapons);
 

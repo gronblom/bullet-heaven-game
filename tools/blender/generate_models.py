@@ -566,6 +566,33 @@ def skin(name, color=(0.86, 0.62, 0.5)):
     return m
 
 
+def leather(name, color, rough=0.5):
+    """Worn leather: fine pebbled grain, creases and darker, shinier wear."""
+    m = Mat(name)
+    grain = m.voronoi(scale=45.0)
+    creases = m.noise(scale=3.0, detail=6.0, distortion=1.0)
+    m.color(m.mix(m.math("MULTIPLY", creases, 0.6), color, tuple(c * 0.55 for c in color)))
+    m.roughness(m.gray(creases, rough - 0.15, rough + 0.15))
+    m.normal(m.bump(grain, strength=0.25, distance=0.01, previous=m.bump(creases, strength=0.2, distance=0.05)))
+    return m
+
+
+def gold(name, dirt=0.5):
+    """Old gold: polished highs, dark grime collected in big soft patches."""
+    m = Mat(name)
+    grime = m.noise(scale=2.5, detail=6.0, roughness=0.6)
+    m.color(m.mix(m.math("MULTIPLY", m.math("MAXIMUM", m.math("SUBTRACT", grime, 0.45), 0.0), dirt * 3.0),
+                  (1.0, 0.72, 0.28), (0.25, 0.15, 0.05)))
+    m.metal(1.0)
+    m.roughness(m.gray(grime, 0.15, 0.6))
+    m.normal(m.bump(m.noise(scale=30.0, detail=3.0), strength=0.15, distance=0.01))
+    return m
+
+
+def mahogany(name, axis="Z", scale=1.5):
+    return wood(name, (0.32, 0.12, 0.06), (0.13, 0.04, 0.02), axis, scale, rough=0.35)
+
+
 def glow(name, color, strength=3.0):
     m = Mat(name)
     m.color(color)
@@ -851,49 +878,78 @@ def build_beetle():
 
 
 def build_runner():
-    """Little explorer, ~1.2 tall. Limbs stay separate objects (LegL/LegR/ArmL/ArmR) so the game can swing them."""
-    suit = fabric("suit", (0.85, 0.32, 0.06))
-    boots = plastic("boots", (0.18, 0.11, 0.07), rough=0.6)
-    face = skin("skin")
-    dark = plastic("dark", (0.03, 0.03, 0.035), rough=0.2)
-    pack = fabric("pack", (0.22, 0.3, 0.2))
-    helmet = plastic("helmet", (0.92, 0.9, 0.85), rough=0.25)
-    bulb = glow("bulb", (1.0, 0.85, 0.35), 4.0)
+    """Chibi explorer, ~1.35 tall: fedora, leather jacket over a khaki shirt, satchel, boots.
+    Limbs stay separate objects (LegL/LegR/ArmL/ArmR) so the game can swing them."""
+    khaki = fabric("khaki", (0.5, 0.4, 0.24), rough=0.85)
+    jacket = leather("jacket", (0.3, 0.15, 0.07), rough=0.5)
+    boot = leather("boot", (0.16, 0.09, 0.05), rough=0.45)
+    sole = plastic("sole", (0.05, 0.04, 0.035), rough=0.8)
+    belt = leather("belt", (0.1, 0.06, 0.04), rough=0.4)
+    satchel = leather("satchel", (0.42, 0.27, 0.12), rough=0.6)
+    brass = metal("buckle", (0.85, 0.65, 0.3), rough=0.25)
+    face = skin("skin", (0.88, 0.62, 0.48))
+    eye_white = plastic("eye_white", (0.95, 0.95, 0.92), rough=0.1)
+    dark = plastic("pupil", (0.03, 0.02, 0.02), rough=0.05)
+    hair = fabric("hair", (0.18, 0.1, 0.05), rough=0.7)
+    felt = fabric("felt", (0.34, 0.22, 0.12), rough=0.9)
+    band = fabric("band", (0.08, 0.05, 0.04), rough=0.6)
+    scarf = fabric("scarf", (0.55, 0.06, 0.04), rough=0.8)
 
-    torso = join([
-        with_material(sphere("torso", 0.22, (0, 0, 0.6), (1.0, 0.85, 1.25), 24, 14), suit.mat),
-        with_material(cylinder("belt", 0.205, 0.06, (0, 0, 0.42), vertices=24), dark.mat),
-        with_material(box("backpack", (0.3, 0.16, 0.34), (0, 0.22, 0.66), bevel=0.04, segments=3), pack.mat),
-        with_material(sphere("head", 0.24, (0, -0.02, 1.02), (1.0, 0.95, 0.95), 28, 16), face.mat),
-        with_material(sphere("helmet", 0.26, (0, 0.01, 1.07), (1.02, 1.0, 0.8), 28, 16), helmet.mat),
-        with_material(sphere("eyeL", 0.035, (0.08, -0.22, 1.02), segments=12, rings=8), dark.mat),
-        with_material(sphere("eyeR", 0.035, (-0.08, -0.22, 1.02), segments=12, rings=8), dark.mat),
-        with_material(tube("antenna", [(0, 0.05, 1.27), (0.02, 0.08, 1.42), (0.05, 0.06, 1.52)], [0.012, 0.01, 0.008]), dark.mat),
-        with_material(sphere("bulb", 0.045, (0.05, 0.06, 1.55), segments=12, rings=8), bulb.mat),
-    ], "Body")
-    tag(torso, "Body")
+    parts = [
+        # Torso: jacket with the shirt showing in a V at the front.
+        with_material(sphere("jacket", 0.215, (0, 0, 0.62), (1.02, 0.88, 1.2), 28, 16), jacket),
+        with_material(torus("neckerchief", 0.085, 0.03, (0, -0.02, 0.83), rot=(0.25, 0, 0), major_segments=20, minor_segments=8), scarf),
+        with_material(cylinder("belt", 0.205, 0.06, (0, 0, 0.44), vertices=28), belt),
+        with_material(box("buckle", (0.06, 0.02, 0.05), (0, -0.205, 0.44), bevel=0.008), brass),
+        with_material(tube("strap", [(-0.17, -0.12, 0.78), (0.0, -0.2, 0.62), (0.2, -0.12, 0.46)], [0.018, 0.018, 0.018]), satchel),
+        with_material(box("satchel", (0.08, 0.2, 0.17), (0.24, -0.02, 0.42), bevel=0.03, segments=3), satchel),
+        with_material(torus("whip", 0.06, 0.012, (-0.215, 0.02, 0.44), rot=(0, math.pi / 2, 0), major_segments=16, minor_segments=6), belt),
+        with_material(cylinder("neck", 0.07, 0.1, (0, -0.01, 0.84), vertices=16), face),
+        # Head and face.
+        with_material(sphere("head", 0.23, (0, -0.02, 1.02), (1.0, 0.95, 0.97), 32, 18), face),
+        with_material(sphere("nose", 0.035, (0, -0.245, 0.99), (1.0, 0.9, 1.0), 12, 8), face),
+        with_material(sphere("earL", 0.045, (0.225, -0.01, 1.0), (0.5, 1.0, 1.2), 10, 8), face),
+        with_material(sphere("earR", 0.045, (-0.225, -0.01, 1.0), (0.5, 1.0, 1.2), 10, 8), face),
+        with_material(sphere("hair", 0.225, (0, 0.04, 1.04), (1.02, 0.95, 0.9), 24, 12), hair),
+        with_material(tube("mouth", [(-0.04, -0.2, 0.93), (0, -0.208, 0.92), (0.04, -0.2, 0.93)], [0.007, 0.008, 0.007]), dark),
+        # Fedora: pinched crown, ribbon band, brim curled up at the sides.
+        with_material(cylinder("crown", 0.19, 0.17, (0, 0.0, 1.25), vertices=32, radius_top=0.16), felt),
+        with_material(cylinder("ribbon", 0.188, 0.045, (0, 0.0, 1.2), vertices=32, radius_top=0.182), band),
+        with_material(cylinder("brim", 0.36, 0.02, (0, 0.0, 1.17), vertices=40), felt),
+    ]
+    crown, brim = parts[-3], parts[-1]
+    deform(crown, lambda v: Vector((v.x * (1 - 0.15 * max(0, -v.y) / 0.19), v.y, v.z - (0.04 * math.exp(-(v.x * v.x) / 0.004) if v.z > 1.3 else 0))))
+    deform(brim, lambda v: Vector((v.x, v.y, v.z + 0.07 * (v.x / 0.36) ** 2 - 0.02 * max(0, -v.y / 0.36))))
+    for side in (1, -1):
+        parts.append(with_material(sphere(f"white{side}", 0.045, (side * 0.08, -0.195, 1.03), (1.0, 0.6, 1.1), 14, 10), eye_white))
+        parts.append(with_material(sphere(f"pupil{side}", 0.026, (side * 0.08, -0.225, 1.025), (1.0, 0.5, 1.1), 12, 8), dark))
+        parts.append(with_material(tube(f"brow{side}", [(side * 0.04, -0.215, 1.09), (side * 0.08, -0.22, 1.1), (side * 0.12, -0.21, 1.085)],
+                                        [0.011, 0.013, 0.01]), hair))
+    torso = tag(join(parts, "Body"), "Body")
 
     limbs = []
     for side, suffix in ((1, "L"), (-1, "R")):
         leg = join([
-            with_material(tube(f"thigh{suffix}", [(side * 0.1, 0, 0.42), (side * 0.1, -0.01, 0.12)], [0.075, 0.065]), suit.mat),
-            with_material(box(f"boot{suffix}", (0.13, 0.22, 0.12), (side * 0.1, -0.04, 0.06), bevel=0.04, segments=3), boots.mat),
+            with_material(tube(f"trouser{suffix}", [(side * 0.1, 0, 0.44), (side * 0.1, -0.01, 0.16)], [0.08, 0.07]), khaki),
+            with_material(box(f"boot{suffix}", (0.14, 0.24, 0.13), (side * 0.1, -0.035, 0.085), bevel=0.045, segments=3), boot),
+            with_material(box(f"sole{suffix}", (0.15, 0.26, 0.035), (side * 0.1, -0.035, 0.018), bevel=0.012, segments=2), sole),
         ], f"Leg{suffix}")
         tag(leg, f"Leg{suffix}")
         arm = join([
-            with_material(tube(f"arm{suffix}", [(side * 0.21, 0, 0.74), (side * 0.27, 0, 0.55), (side * 0.27, -0.03, 0.42)],
-                               [0.055, 0.05, 0.045]), suit.mat),
-            with_material(sphere(f"hand{suffix}", 0.05, (side * 0.27, -0.03, 0.39), segments=12, rings=8), face.mat),
+            with_material(tube(f"sleeve{suffix}", [(side * 0.21, 0, 0.75), (side * 0.27, 0, 0.56), (side * 0.27, -0.03, 0.44)],
+                               [0.06, 0.055, 0.05]), jacket),
+            with_material(sphere(f"hand{suffix}", 0.052, (side * 0.27, -0.035, 0.39), (1.0, 1.0, 1.15), 14, 10), face),
+            with_material(sphere(f"thumb{suffix}", 0.022, (side * 0.245, -0.075, 0.41), segments=10, rings=6), face),
         ], f"Arm{suffix}")
         tag(arm, f"Arm{suffix}")
         limbs += [leg, arm]
 
     runner = join([torso, *limbs], "Body")
-    bake(runner, 1024, emissive=True)
+    bake(runner, 2048)
 
     # Split the limbs back out with their pivots at hip / shoulder.
-    return split_parts(runner, {"LegL": (0.1, 0, 0.42), "LegR": (-0.1, 0, 0.42),
-                                "ArmL": (0.21, 0, 0.74), "ArmR": (-0.21, 0, 0.74)})
+    return split_parts(runner, {"LegL": (0.1, 0, 0.44), "LegR": (-0.1, 0, 0.44),
+                                "ArmL": (0.21, 0, 0.75), "ArmR": (-0.21, 0, 0.75)})
 
 
 def build_gem():
@@ -1339,10 +1395,16 @@ def build_fridge():
     return [bake(join(parts, "fridge"), 2048)]
 
 
-def build_floor_textures():
-    """Seamless 16 x 16 unit patch of oak floorboards (rows 2 wide, boards 16 long, staggered), baked
-    into textures/floor_*.jpg. Every board gets its own tone and grain, with small gaps between."""
-    period, row_width, board_length = 16.0, 2.0, 16.0
+OAK = ((0.12, 0.06, 0.025), (0.25, 0.14, 0.06), (0.4, 0.24, 0.11), (0.42, 0.27, 0.13), (0.09, 0.05, 0.02))
+WALNUT = ((0.05, 0.02, 0.01), (0.12, 0.05, 0.022), (0.22, 0.1, 0.045), (0.25, 0.12, 0.05), (0.03, 0.015, 0.008))
+
+
+def build_floor_textures(name="floor", palette=OAK, row_width=2.0, board_length=16.0):
+    """Seamless 16 x 16 unit patch of floorboards (rows `row_width` wide, boards `board_length` long,
+    staggered), baked into textures/{name}_*.jpg. Every board gets its own tone and grain, with
+    small gaps between."""
+    period = 16.0
+    dark_grain, mid_grain, light_grain, light_board, dark_board = palette
     f = Mat("floor")
     x = f.math("ADD", f.axis("X"), period / 2)  # patch spans 0..16 in both axes
     y = f.math("ADD", f.axis("Y"), period / 2)
@@ -1362,10 +1424,10 @@ def build_floor_textures():
     shift = f.math("MULTIPLY", tone, 37.0)
     grain = f.seamless_noise(period, freq=(0.12, 2.5), detail=8.0, roughness=0.6, distortion=0.3, x=x, y=y, extra=shift)
     fine = f.seamless_noise(period, freq=(0.6, 18.0), detail=3.0, x=x, y=y, extra=shift)
-    oak = f.ramp(grain, [(0.25, (0.12, 0.06, 0.025)), (0.5, (0.25, 0.14, 0.06)), (0.75, (0.4, 0.24, 0.11))])
-    oak = f.mix(f.math("MULTIPLY", fine, 0.45), oak, (0.1, 0.05, 0.02))
-    board = f.mix(f.math("MULTIPLY", tone, 0.4), oak, (0.42, 0.27, 0.13))        # lighter boards
-    board = f.mix(f.math("MULTIPLY", f.math("SUBTRACT", 1.0, tone), 0.35), board, (0.09, 0.05, 0.02))  # and darker ones
+    oak = f.ramp(grain, [(0.25, dark_grain), (0.5, mid_grain), (0.75, light_grain)])
+    oak = f.mix(f.math("MULTIPLY", fine, 0.45), oak, tuple(c * 0.8 for c in dark_grain))
+    board = f.mix(f.math("MULTIPLY", tone, 0.4), oak, light_board)                 # lighter boards
+    board = f.mix(f.math("MULTIPLY", f.math("SUBTRACT", 1.0, tone), 0.35), board, dark_board)  # and darker ones
     f.color(f.mix(gap, board, (0.04, 0.025, 0.015)))
 
     # Satin lacquer, scuffed in big soft patches; gaps are dull.
@@ -1378,27 +1440,36 @@ def build_floor_textures():
 
     bpy.ops.mesh.primitive_plane_add(size=period, location=(0, 0, 0))
     plane = bpy.context.active_object
-    plane.name = "floor"
+    plane.name = name
     with_material(plane, f.mat)
-
-    folder = os.path.join(ARGS.out, "textures")
-    os.makedirs(folder, exist_ok=True)
-    size = max(64, int(2048 * TEX_SCALE))
-    for suffix, kind, socket, space in (("albedo", "EMIT", "Base Color", "sRGB"), ("roughness", "EMIT", "Roughness", "Non-Color"),
-                                        ("normal", "NORMAL", None, "Non-Color")):
-        image = bpy.data.images.new(f"floor_{suffix}", size, size, alpha=False)
-        image.colorspace_settings.name = space
-        _bake_pass(plane, image, kind, socket=socket)
-        image.filepath_raw = os.path.join(folder, f"floor_{suffix}.jpg")
-        image.file_format = "JPEG"
-        image.save()
-        print(f"  wrote textures/floor_{suffix}.jpg")
+    bake_texture_set(plane, name, 2048)
     if ARGS.preview:
-        render_floor_preview(plane)
+        render_floor_preview(plane, name)
     return None
 
 
-def render_floor_preview(plane):
+def bake_texture_set(plane, name, size, emissive=False):
+    """Bakes a flat patch's material into textures/{name}_albedo/roughness/normal(/emission).jpg."""
+    folder = os.path.join(ARGS.out, "textures")
+    os.makedirs(folder, exist_ok=True)
+    size = max(64, int(size * TEX_SCALE))
+    passes = [("albedo", "EMIT", "Base Color", "sRGB"), ("roughness", "EMIT", "Roughness", "Non-Color"),
+              ("normal", "NORMAL", None, "Non-Color")]
+    if emissive:
+        passes.append(("emission", "EMIT", ("Emission Color", "Emission"), "sRGB"))
+    for suffix, kind, socket, space in passes:
+        image = bpy.data.images.new(f"{name}_{suffix}", size, size, alpha=False)
+        image.colorspace_settings.name = space
+        _bake_pass(plane, image, kind, socket=socket)
+        image.filepath_raw = os.path.join(folder, f"{name}_{suffix}.jpg")
+        image.file_format = "JPEG"
+        image.save()
+        print(f"  wrote textures/{name}_{suffix}.jpg")
+    if ARGS.preview and name != "floor" and not name.startswith("floor"):
+        render_floor_preview(plane, name)
+
+
+def render_floor_preview(plane, name="floor"):
     """View across the baked floor (repeated 3 x 3) to judge it and check the seams."""
     baked = bpy.data.materials.new("floor_baked")
     baked.use_nodes = True
@@ -1414,14 +1485,436 @@ def render_floor_preview(plane):
         links.new(mapping.outputs["Vector"], t.inputs["Vector"])
         return t
 
-    links.new(tex("floor_albedo").outputs["Color"], bsdf.inputs["Base Color"])
-    links.new(tex("floor_roughness").outputs["Color"], bsdf.inputs["Roughness"])
+    links.new(tex(f"{name}_albedo").outputs["Color"], bsdf.inputs["Base Color"])
+    links.new(tex(f"{name}_roughness").outputs["Color"], bsdf.inputs["Roughness"])
     normal_map = nodes.new("ShaderNodeNormalMap")
-    links.new(tex("floor_normal").outputs["Color"], normal_map.inputs["Color"])
+    links.new(tex(f"{name}_normal").outputs["Color"], normal_map.inputs["Color"])
     links.new(normal_map.outputs["Normal"], bsdf.inputs["Normal"])
     plane.scale = (3, 3, 1)
     with_material(plane, baked)
-    render_preview([plane], "floor")
+    render_preview([plane], name)
+
+
+def flat_patch(name, material, period=16.0):
+    bpy.ops.mesh.primitive_plane_add(size=period, location=(0, 0, 0))
+    plane = bpy.context.active_object
+    plane.name = name
+    return with_material(plane, material)
+
+
+# --- The Study ----------------------------------------------------------------------------------
+
+def build_armchair():
+    """Chesterfield armchair, 12 wide (X) x 11 deep (Y), facing -Y. Climbable in steps:
+    seat 4, arms 5.6, back 7.2 (matches the Study's collision). Origin at bottom centre."""
+    hide = Mat("chesterfield")
+    cells = hide.voronoi(scale=1.2, vector=hide.vec(scale=(1, 1, 1.4)))  # button-tufted diamonds
+    creases = hide.noise(scale=2.0, detail=6.0, distortion=1.0)
+    base = hide.ramp(creases, [(0.3, (0.07, 0.012, 0.008)), (0.7, (0.2, 0.035, 0.02))])  # oxblood leather
+    hide.color(hide.mix(hide.math("LESS_THAN", cells, 0.12), base, (0.02, 0.005, 0.004)))
+    hide.roughness(hide.gray(creases, 0.3, 0.55))
+    hide.normal(hide.bump(cells, strength=0.5, distance=0.05, previous=hide.bump(hide.voronoi(scale=40.0), strength=0.2, distance=0.01)))
+    feet = mahogany("chair_feet")
+    w, d = 12.0, 11.0
+    parts = [
+        with_material(box("base", (w, d, 3.0), (0, 0, 2.0), bevel=0.6, segments=4), hide),
+        with_material(box("cushion", (w - 4.0, d - 3.0, 1.0), (0, -0.5, 3.5), bevel=0.4, segments=4), hide),
+        with_material(box("back", (w, 2.0, 7.2 - 0.5), (0, d / 2 - 1.0, 0.5 + (6.7 / 2)), bevel=0.7, segments=4), hide),
+    ]
+    for side in (1, -1):
+        parts.append(with_material(box(f"arm{side}", (2.2, d - 2.0, 5.1), (side * (w / 2 - 0.95), -0.5, 0.5 + 5.1 / 2), bevel=0.6, segments=4), hide))
+        parts.append(with_material(cylinder(f"roll{side}", 1.1, d - 2.2, (side * (w / 2 - 1.0), -0.5, 4.5), rot=(math.pi / 2, 0, 0), vertices=24), hide))
+        for fy in (-d / 2 + 1.5, d / 2 - 1.5):
+            parts.append(with_material(cylinder(f"foot{side}{fy}", 0.4, 0.6, (side * (w / 2 - 1.2), fy, 0.3), vertices=12, radius_top=0.3), feet))
+    return [bake(join(parts, "armchair"), 2048)]
+
+
+def build_footstool():
+    """Round tufted leather footstool, radius 2.8, 3.2 tall, on turned wooden feet."""
+    hide = leather("footstool_leather", (0.22, 0.04, 0.025), rough=0.4)
+    feet = mahogany("footstool_feet")
+    top = cylinder("cushion", 2.8, 2.4, (0, 0, 2.0), vertices=40)
+    bevel = top.modifiers.new("bevel", "BEVEL")
+    bevel.width = 0.6
+    bevel.segments = 5
+    apply_modifiers(top)
+    smooth(top)
+    parts = [with_material(top, hide)]
+    for i in range(4):
+        a = math.pi / 4 + i * math.pi / 2
+        parts.append(with_material(cylinder(f"foot{i}", 0.35, 0.8, (math.cos(a) * 2.0, math.sin(a) * 2.0, 0.4), vertices=12, radius_top=0.28), feet))
+    for i in range(6):  # buttons
+        a = i * math.tau / 6
+        parts.append(with_material(sphere(f"button{i}", 0.12, (math.cos(a) * 1.3, math.sin(a) * 1.3, 3.18), segments=8, rings=6), hide))
+    return [bake(join(parts, "footstool"), 1024)]
+
+
+def build_desk():
+    """Big partners' desk, 30 (X) x 14 (Y), top at 13: leather writing surface, drawers, turned legs."""
+    wood_mat = mahogany("desk_wood", "X", 2.0)
+    inlay = leather("desk_leather", (0.08, 0.16, 0.08), rough=0.5)
+    brass = metal("desk_brass", (0.85, 0.62, 0.28), rough=0.25)
+    w, d, h = 30.0, 14.0, 13.0
+    parts = [
+        with_material(box("top", (w, d, 0.8), (0, 0, h - 0.4), bevel=0.15, segments=3), wood_mat),
+        with_material(box("leather", (w - 4.0, d - 4.0, 0.06), (0, 0, h + 0.01)), inlay),
+        with_material(box("apron", (w - 1.0, d - 1.0, 2.0), (0, 0, h - 1.8), bevel=0.1), wood_mat),
+    ]
+    for side in (1, -1):  # two drawer pedestals
+        x = side * (w / 2 - 5.0)
+        parts.append(with_material(box(f"pedestal{side}", (8.0, d - 1.0, h - 3.6), (x, 0, 0.6 + (h - 3.6) / 2), bevel=0.1), wood_mat))
+        parts.append(with_material(box(f"plinth{side}", (8.4, d - 0.6, 0.6), (x, 0, 0.3), bevel=0.1), wood_mat))
+        for i in range(3):
+            z = 1.8 + i * 3.2
+            parts.append(with_material(box(f"drawer{side}{i}", (7.0, 0.2, 2.8), (x, -d / 2 + 0.4, z + 1.2), bevel=0.08), wood_mat))
+            parts.append(with_material(cylinder(f"pull{side}{i}", 0.25, 0.3, (x, -d / 2 + 0.2, z + 1.4), rot=(math.pi / 2, 0, 0), vertices=12), brass))
+    return [bake(join(parts, "desk"), 2048)]
+
+
+def build_idol():
+    """Golden fertility idol, ~3.5 tall: squat body, big head, carved face. Origin at bottom."""
+    g = gold("idol_gold", dirt=0.6)
+    eye = plastic("idol_eye", (0.03, 0.02, 0.01), rough=0.4)
+    parts = [
+        with_material(cylinder("plinth", 0.9, 0.3, (0, 0, 0.15), vertices=24), g),
+        with_material(sphere("body", 0.75, (0, 0, 1.1), (1.0, 0.85, 1.05), 24, 14), g),
+        with_material(sphere("head", 0.62, (0, -0.05, 2.35), (1.0, 0.95, 1.1), 24, 14), g),
+        with_material(sphere("nose", 0.12, (0, -0.62, 2.3), (1.0, 0.8, 1.4), 12, 8), g),
+        with_material(box("mouth", (0.3, 0.06, 0.05), (0, -0.57, 2.05)), eye),
+        with_material(cylinder("headdress", 0.55, 0.25, (0, -0.05, 2.95), vertices=24, radius_top=0.42), g),
+        with_material(cylinder("headdress2", 0.38, 0.25, (0, -0.05, 3.18), vertices=24, radius_top=0.22), g),
+    ]
+    for side in (1, -1):
+        parts.append(with_material(sphere(f"eye{side}", 0.11, (side * 0.22, -0.55, 2.5), (1.0, 0.5, 0.7), 12, 8), eye))
+        parts.append(with_material(tube(f"arm{side}", [(side * 0.6, -0.1, 1.5), (side * 0.85, -0.35, 1.1), (side * 0.35, -0.65, 0.95)],
+                                        [0.16, 0.14, 0.12]), g))
+        parts.append(with_material(sphere(f"ear{side}", 0.2, (side * 0.62, 0.0, 2.4), (0.4, 0.8, 1.2), 12, 8), g))
+    return [bake(join(parts, "idol"), 1024)]
+
+
+def build_globe():
+    """Floor-standing antique globe, ~14 tall: turned wooden stand, brass meridian, sepia map."""
+    sea = Mat("globe_map")
+    land = sea.math("GREATER_THAN", sea.noise(scale=0.6, detail=6.0, roughness=0.55), 0.55)
+    paper = sea.ramp(sea.noise(scale=3.0, detail=4.0), [(0.3, (0.45, 0.35, 0.18)), (0.7, (0.62, 0.5, 0.28))])
+    lat = sea.math("LESS_THAN", sea.math("ABSOLUTE", sea.math("SUBTRACT", sea.math("FRACT", sea.math("MULTIPLY", sea.axis("Z"), 1.2)), 0.5)), 0.015)
+    land_col = sea.mix(land, paper, (0.32, 0.3, 0.12))
+    sea.color(sea.mix(sea.math("MULTIPLY", lat, 0.5), land_col, (0.2, 0.12, 0.05)))
+    sea.roughness(0.35)
+    sea.normal(sea.bump(land, strength=0.2, distance=0.02))
+    stand = mahogany("globe_stand")
+    brass = metal("globe_brass", (0.85, 0.62, 0.28), rough=0.25)
+    parts = [
+        with_material(sphere("globe", 4.0, (0, 0, 9.5), segments=48, rings=28, rot=(0.4, 0, 0)), sea),
+        with_material(torus("meridian", 4.3, 0.12, (0, 0, 9.5), rot=(math.pi / 2, 0.4, 0), major_segments=48), brass),
+        with_material(torus("horizon", 4.4, 0.25, (0, 0, 9.5), major_segments=48), stand),
+        with_material(cylinder("pillar", 0.5, 5.0, (0, 0, 3.0), vertices=20, radius_top=0.35), stand),
+        with_material(cylinder("base", 2.8, 0.5, (0, 0, 0.25), vertices=32, radius_top=2.5), stand),
+    ]
+    return [bake(join(parts, "globe"), 2048)]
+
+
+def build_chest():
+    """Treasure chest, 8 (X) x 5 (Y) x 5 tall with a rounded lid, iron bands, gold spilling out front."""
+    planks = wood("chest_wood", (0.35, 0.2, 0.1), (0.15, 0.08, 0.04), "X", 3.0, rough=0.7)
+    iron = metal("chest_iron", (0.2, 0.19, 0.18), rough=0.6)
+    coins = gold("chest_gold", dirt=0.2)
+    parts = [
+        with_material(box("box", (8.0, 5.0, 3.6), (0, 0, 1.8), bevel=0.1), planks),
+        with_material(cylinder("lid", 2.5, 8.0, (0, 0, 3.6), rot=(0, math.pi / 2, 0), vertices=32), planks),
+        with_material(box("lock", (0.8, 0.3, 1.0), (0, -2.55, 3.3), bevel=0.05), iron),
+    ]
+    deform(parts[1], lambda v: Vector((v.x, v.y, max(v.z, 3.6) if v.z < 3.6 else 3.6 + (v.z - 3.6) * 0.55)))
+    for x in (-3.0, 0.0, 3.0):
+        parts.append(with_material(box(f"band{x}", (0.35, 5.15, 3.65), (x, 0, 1.82)), iron))
+        parts.append(with_material(torus(f"lidband{x}", 2.5 * 0.78, 0.12, (x, 0, 3.6), rot=(0, math.pi / 2, 0), major_segments=24), iron))
+    rng = random.Random(9)
+    for i in range(18):
+        parts.append(with_material(cylinder(f"coin{i}", 0.35, 0.06, (rng.uniform(-3, 3), -2.5 - rng.uniform(0.2, 1.8), 0.03 + rng.random() * 0.1),
+                                            rot=(rng.uniform(-0.3, 0.3), rng.uniform(-0.3, 0.3), 0), vertices=16), coins))
+    return [bake(join(parts, "chest"), 2048)]
+
+
+def build_urn():
+    """Ancient amphora, ~7 tall: terracotta with a black-figure meander band. Origin at bottom."""
+    clay = Mat("urn_clay")
+    z = clay.axis("Z")
+    band = clay.math("MULTIPLY", clay.math("GREATER_THAN", z, 3.2), clay.math("LESS_THAN", z, 4.2))
+    meander = clay.math("GREATER_THAN", clay.wave("BANDS", "X", scale=3.0, distortion=1.0, vector=clay.vec(scale=(1, 1, 0))), 0.5)
+    base = clay.ramp(clay.noise(scale=4.0, detail=5.0), [(0.3, (0.45, 0.17, 0.07)), (0.7, (0.62, 0.27, 0.12))])
+    clay.color(clay.mix(clay.math("MULTIPLY", band, meander), base, (0.03, 0.02, 0.015)))
+    clay.roughness(clay.gray(clay.noise(scale=6.0), 0.5, 0.8))
+    clay.normal(clay.bump(clay.noise(scale=50.0), strength=0.15, distance=0.01))
+    urn = lathe("urn", [(0.0, 0.0), (0.9, 0.0), (0.7, 0.4), (1.8, 2.5), (2.0, 3.6), (1.5, 5.0), (0.7, 5.8), (0.65, 6.6),
+                        (0.95, 6.9), (0.8, 7.0), (0.0, 6.95)], steps=48)
+    parts = [with_material(urn, clay)]
+    for side in (1, -1):
+        parts.append(with_material(tube(f"handle{side}", [(side * 0.7, 0, 6.3), (side * 1.6, 0, 6.2), (side * 1.7, 0, 5.2), (side * 1.4, 0, 4.7)],
+                                        [0.15, 0.15, 0.15, 0.15]), clay))
+    return [bake(join(parts, "urn"), 1024)]
+
+
+def build_candle():
+    """Brass candlestick with a dripping wax candle and a glowing flame, ~4.5 tall."""
+    wax = Mat("wax")
+    wax.color((0.92, 0.86, 0.72))
+    wax.roughness(0.4)
+    wax.set(("Subsurface Weight", "Subsurface"), 0.5)
+    brass = metal("candle_brass", (0.85, 0.62, 0.28), rough=0.25)
+    flame = glow("flame", (1.0, 0.6, 0.2), 8.0)
+    parts = [
+        with_material(cylinder("dish", 1.0, 0.2, (0, 0, 0.1), vertices=24), brass),
+        with_material(cylinder("stem", 0.18, 1.6, (0, 0, 1.0), vertices=12), brass),
+        with_material(cylinder("cup", 0.45, 0.3, (0, 0, 1.9), vertices=16), brass),
+        with_material(cylinder("candle", 0.3, 2.0, (0, 0, 3.05), vertices=16), wax),
+        with_material(sphere("flame", 0.14, (0, 0, 4.3), (1.0, 1.0, 2.0), 12, 8), flame),
+    ]
+    for i in range(4):
+        a = i * math.tau / 4 + 0.4
+        parts.append(with_material(sphere(f"drip{i}", 0.08, (math.cos(a) * 0.3, math.sin(a) * 0.3, 3.6 + 0.3 * (i % 2)), (1, 1, 3.0), 8, 6), wax))
+    return [bake(join(parts, "candle"), 512, emissive=True)]
+
+
+def build_panel_wall():
+    """One 16-wide, 36-tall bay of dark wood panelling (skirting, wainscot, tall raised panel,
+    picture rail, crown), facing -Y. Tiled along the Study's walls."""
+    wood_mat = mahogany("panel_wood", "Z", 1.2)
+    rail = mahogany("panel_rail", "X", 3.0)
+    w, h = 16.0, 36.0
+    parts = [with_material(box("back", (w, 1.0, h), (0, 0, h / 2)), wood_mat),
+             with_material(box("skirting", (w, 1.5, 1.6), (0, -0.4, 0.8), bevel=0.1), rail),
+             with_material(box("dado", (w, 1.6, 0.6), (0, -0.5, 9.0), bevel=0.15), rail),
+             with_material(box("picture", (w, 1.5, 0.5), (0, -0.4, 30.0), bevel=0.15), rail),
+             with_material(box("crown", (w, 2.2, 1.2), (0, -0.7, h - 0.6), bevel=0.25, segments=3), rail)]
+    for x in (-w / 4, w / 4):
+        parts.append(with_material(box(f"low{x}", (w / 2 - 1.6, 0.6, 5.5), (x, -0.6, 4.95), bevel=0.35, segments=3), wood_mat))
+        parts.append(with_material(box(f"high{x}", (w / 2 - 1.6, 0.6, 18.0), (x, -0.6, 19.6), bevel=0.35, segments=3), wood_mat))
+    return [bake(join(parts, "panel_wall"), 1024)]
+
+
+def build_rug():
+    """Persian rug 40 x 28: deep red field, medallion, patterned borders, fringes. Thin slab."""
+    m = Mat("rug")
+    x, y = m.axis("X"), m.axis("Y")
+    ax, ay = m.math("ABSOLUTE", x), m.math("ABSOLUTE", y)
+    edge = m.math("MINIMUM", m.math("SUBTRACT", 20.0, ax), m.math("SUBTRACT", 14.0, ay))
+    border = m.math("LESS_THAN", edge, 3.5)
+    stripe = m.math("MULTIPLY", m.math("GREATER_THAN", edge, 0.8), m.math("LESS_THAN", edge, 1.1))
+    diamond = m.math("ADD", m.math("DIVIDE", ax, 9.0), m.math("DIVIDE", ay, 6.0))
+    medallion = m.math("LESS_THAN", diamond, 1.0)
+    rings = m.math("FRACT", m.math("MULTIPLY", diamond, 3.0))
+    motif = m.math("GREATER_THAN", m.voronoi(scale=0.6, vector=m.vec(scale=(1, 1, 0))), 0.45)
+    field = m.mix(m.math("MULTIPLY", motif, 0.6), (0.28, 0.03, 0.03), (0.12, 0.08, 0.2))
+    med = m.ramp(rings, [(0.0, (0.08, 0.1, 0.25)), (0.35, (0.65, 0.48, 0.2)), (0.6, (0.42, 0.05, 0.04)), (0.85, (0.75, 0.65, 0.45))], "CONSTANT")
+    col = m.mix(medallion, field, med)
+    col = m.mix(border, col, m.mix(m.math("GREATER_THAN", m.wave("BANDS", "X", scale=1.2, distortion=2.0), 0.5), (0.08, 0.1, 0.25), (0.6, 0.45, 0.2)))
+    col = m.mix(stripe, col, (0.75, 0.65, 0.45))
+    wear = m.noise(scale=0.25, detail=4.0)
+    m.color(m.mix(m.math("MULTIPLY", m.math("MAXIMUM", m.math("SUBTRACT", wear, 0.55), 0.0), 2.0), col, (0.45, 0.38, 0.32)))
+    m.roughness(0.95)
+    m.normal(m.bump(m.noise(scale=80.0, detail=2.0), strength=0.4, distance=0.01))
+    m.set(("Sheen Weight", "Sheen"), 0.5)
+    rug = box("rug", (40.0, 28.0, 0.12), (0, 0, 0.06))
+    fringe = Mat("fringe")
+    fringe.color((0.8, 0.74, 0.6))
+    fringe.roughness(0.9)
+    parts = [with_material(rug, m)]
+    for side in (1, -1):
+        parts.append(with_material(box(f"fringe{side}", (1.0, 27.0, 0.05), (side * 20.5, 0, 0.03)), fringe))
+    return [bake(join(parts, "rug"), 2048)]
+
+
+# --- The Backrooms ------------------------------------------------------------------------------
+
+def build_wallpaper_textures():
+    """Mono-yellow wallpaper with a faint repeating pattern and damp stains (seamless 16 x 16)."""
+    m = Mat("wallpaper")
+    x = m.math("ADD", m.axis("X"), 8.0)
+    y = m.math("ADD", m.axis("Y"), 8.0)
+    stripes = m.math("LESS_THAN", m.math("ABSOLUTE", m.math("SUBTRACT", m.math("FRACT", m.math("DIVIDE", x, 1.0)), 0.5)), 0.06)
+    chevron = m.math("LESS_THAN", m.math("ABSOLUTE", m.math("SUBTRACT", m.math("FRACT", m.math("ADD", m.math("DIVIDE", y, 2.0),
+                                                                                          m.math("ABSOLUTE", m.math("SUBTRACT", m.math("FRACT", x), 0.5)))), 0.5)), 0.05)
+    stains = m.seamless_noise(16.0, freq=(0.15, 0.25), detail=5.0, roughness=0.6, x=x, y=y)
+    mottle = m.seamless_noise(16.0, freq=(2.0, 2.0), detail=4.0, x=x, y=y)
+    base = m.ramp(mottle, [(0.3, (0.55, 0.47, 0.2)), (0.7, (0.65, 0.57, 0.26))])
+    base = m.mix(m.math("MULTIPLY", m.math("MAXIMUM", stripes, chevron), 0.25), base, (0.42, 0.36, 0.14))
+    damp = m.math("MULTIPLY", m.math("MAXIMUM", m.math("SUBTRACT", stains, 0.55), 0.0), 3.0)
+    m.color(m.mix(damp, base, (0.32, 0.25, 0.1)))
+    m.roughness(0.75)
+    m.normal(m.bump(mottle, strength=0.05, distance=0.01))
+    bake_texture_set(flat_patch("wallpaper", m), "wallpaper", 1024)
+    return None
+
+
+def build_carpet_textures():
+    """Damp, worn office carpet: short pile, faded yellow-beige, stains (seamless 16 x 16)."""
+    m = Mat("carpet")
+    x = m.math("ADD", m.axis("X"), 8.0)
+    y = m.math("ADD", m.axis("Y"), 8.0)
+    pile = m.seamless_noise(16.0, freq=(40.0, 40.0), detail=2.0, x=x, y=y)
+    mottle = m.seamless_noise(16.0, freq=(0.6, 0.6), detail=5.0, x=x, y=y)
+    stains = m.seamless_noise(16.0, freq=(0.2, 0.2), detail=4.0, roughness=0.65, x=x, y=y)
+    base = m.ramp(mottle, [(0.3, (0.4, 0.33, 0.15)), (0.7, (0.5, 0.42, 0.2))])
+    base = m.mix(m.math("MULTIPLY", pile, 0.35), base, (0.28, 0.22, 0.09))
+    m.color(m.mix(m.math("MULTIPLY", m.math("MAXIMUM", m.math("SUBTRACT", stains, 0.58), 0.0), 3.0), base, (0.22, 0.18, 0.08)))
+    m.roughness(0.95)
+    m.normal(m.bump(pile, strength=0.5, distance=0.01))
+    bake_texture_set(flat_patch("carpet", m), "carpet", 1024)
+    return None
+
+
+# --- The 80s bedroom ----------------------------------------------------------------------------
+
+def build_memphis_carpet_textures():
+    """Memphis-style carpet: confetti of pastel squiggles, triangles and dots on near-black (seamless 16 x 16)."""
+    m = Mat("memphis")
+    x = m.math("ADD", m.axis("X"), 8.0)
+    y = m.math("ADD", m.axis("Y"), 8.0)
+    cell_x, cell_y = m.math("FLOOR", m.math("DIVIDE", x, 2.0)), m.math("FLOOR", m.math("DIVIDE", y, 2.0))
+    cx, cy = m.math("MODULO", cell_x, 8.0), m.math("MODULO", cell_y, 8.0)
+    pick = m.random(cx, cy)
+    hue = m.random(cy, m.math("ADD", cx, 13.0))
+    fx = m.math("SUBTRACT", m.math("FRACT", m.math("DIVIDE", x, 2.0)), 0.5)
+    fy = m.math("SUBTRACT", m.math("FRACT", m.math("DIVIDE", y, 2.0)), 0.5)
+    dot = m.math("LESS_THAN", m.math("ADD", m.math("MULTIPLY", fx, fx), m.math("MULTIPLY", fy, fy)), 0.04)
+    tri = m.math("MULTIPLY", m.math("LESS_THAN", m.math("ABSOLUTE", fx), m.math("MULTIPLY", m.math("ADD", fy, 0.3), 0.6)),
+                 m.math("LESS_THAN", fy, 0.25))
+    squiggle = m.math("LESS_THAN", m.math("ABSOLUTE", m.math("SUBTRACT", fy, m.math("MULTIPLY", m.math("SINE", m.math("MULTIPLY", fx, 14.0)), 0.12))), 0.04)
+    squiggle = m.math("MULTIPLY", squiggle, m.math("LESS_THAN", m.math("ABSOLUTE", fx), 0.4))
+    shape = m.math("ADD", m.math("MULTIPLY", dot, m.math("LESS_THAN", pick, 0.33)),
+                   m.math("ADD", m.math("MULTIPLY", tri, m.math("MULTIPLY", m.math("GREATER_THAN", pick, 0.33), m.math("LESS_THAN", pick, 0.66))),
+                          m.math("MULTIPLY", squiggle, m.math("GREATER_THAN", pick, 0.66))))
+    color = m.ramp(hue, [(0.0, (0.95, 0.3, 0.55)), (0.33, (0.15, 0.75, 0.75)), (0.66, (0.98, 0.8, 0.15)), (1.0, (0.55, 0.35, 0.9))], "CONSTANT")
+    base = m.mix(m.math("MULTIPLY", m.seamless_noise(16.0, freq=(30, 30), detail=2.0, x=x, y=y), 0.3), (0.03, 0.03, 0.05), (0.07, 0.06, 0.1))
+    m.color(m.mix(m.math("MINIMUM", shape, 1.0), base, color))
+    m.roughness(0.9)
+    m.normal(m.bump(m.seamless_noise(16.0, freq=(40, 40), detail=2.0, x=x, y=y), strength=0.4, distance=0.01))
+    bake_texture_set(flat_patch("memphis", m), "memphis", 1024)
+    return None
+
+
+def build_rubiks_cube():
+    """Giant Rubik's cube, 5 x 5 x 5, scrambled stickers on black plastic. Origin at bottom centre."""
+    body = plastic("cube_black", (0.02, 0.02, 0.025), rough=0.35)
+    colors = [(0.95, 0.95, 0.95), (0.95, 0.8, 0.05), (0.8, 0.05, 0.05), (0.95, 0.35, 0.02), (0.05, 0.25, 0.8), (0.05, 0.6, 0.2)]
+    stickers = [plastic(f"sticker{i}", c, rough=0.25) for i, c in enumerate(colors)]
+    s, n = 5.0, 3
+    parts = [with_material(box("core", (s, s, s), (0, 0, s / 2), bevel=0.25, segments=3), body)]
+    rng = random.Random(3)
+    step = s / n
+    for face, (axis, sign) in enumerate((("z", 1), ("z", -1), ("x", 1), ("x", -1), ("y", 1), ("y", -1))):
+        for i in range(n):
+            for j in range(n):
+                u, v = -s / 2 + step * (i + 0.5), -s / 2 + step * (j + 0.5)
+                size, offset = step * 0.86, s / 2 + 0.03
+                if axis == "z":
+                    loc, dims = (u, v, s / 2 + sign * offset), (size, size, 0.08)
+                elif axis == "x":
+                    loc, dims = (sign * offset, u, s / 2 + v), (0.08, size, size)
+                else:
+                    loc, dims = (u, sign * offset, s / 2 + v), (size, 0.08, size)
+                parts.append(with_material(box(f"s{face}{i}{j}", dims, loc, bevel=0.08, segments=2), stickers[rng.randrange(6)]))
+    return [bake(join(parts, "rubiks_cube"), 1024)]
+
+
+def build_crt_tv():
+    """80s CRT television, 11 wide (X) x 9 deep x 9 tall, woodgrain case, glowing colour bars, facing -Y."""
+    case = wood("tv_wood", (0.35, 0.2, 0.1), (0.2, 0.1, 0.05), "X", 3.0, rough=0.5)
+    bezel = plastic("tv_bezel", (0.15, 0.15, 0.16), rough=0.4)
+    knob = metal("tv_knob", (0.7, 0.7, 0.72), rough=0.3)
+    screen = Mat("tv_screen")
+    x = screen.axis("X")
+    bars = screen.ramp(screen.math("FRACT", screen.math("DIVIDE", screen.math("ADD", x, 3.5), 7.0)),
+                       [(0.0, (0.9, 0.9, 0.9)), (0.14, (0.9, 0.9, 0.1)), (0.28, (0.1, 0.9, 0.9)), (0.42, (0.1, 0.9, 0.1)),
+                        (0.57, (0.9, 0.1, 0.9)), (0.71, (0.9, 0.1, 0.1)), (0.85, (0.1, 0.1, 0.9))], "CONSTANT")
+    scan = screen.math("GREATER_THAN", screen.math("FRACT", screen.math("MULTIPLY", screen.axis("Z"), 12.0)), 0.3)
+    lit = screen.mix(screen.math("SUBTRACT", 1.0, scan), bars, tuple(0.4 * c for c in (0.9, 0.9, 0.9)))
+    screen.color((0.02, 0.02, 0.02))
+    screen.roughness(0.05)
+    screen.emission(lit, 2.5)
+    parts = [
+        with_material(box("case", (11.0, 9.0, 9.0), (0, 0, 4.5), bevel=0.4, segments=3), case),
+        with_material(box("bezel_top", (8.5, 0.5, 0.8), (-0.8, -4.6, 7.8), bevel=0.2), bezel),
+        with_material(box("bezel_bottom", (8.5, 0.5, 0.8), (-0.8, -4.6, 1.6), bevel=0.2), bezel),
+        with_material(box("bezel_left", (0.8, 0.5, 7.0), (-4.65, -4.6, 4.7), bevel=0.2), bezel),
+        with_material(box("bezel_right", (0.8, 0.5, 7.0), (3.05, -4.6, 4.7), bevel=0.2), bezel),
+        with_material(box("panel", (1.6, 0.3, 7.0), (4.4, -4.55, 4.7), bevel=0.1), bezel),
+        with_material(box("screen", (7.0, 0.3, 5.4), (-0.8, -4.45, 4.7), bevel=0.4, segments=4), screen),
+    ]
+    for i, z in enumerate((6.5, 4.5)):
+        parts.append(with_material(cylinder(f"knob{i}", 0.4, 0.4, (4.4, -4.85, z), rot=(math.pi / 2, 0, 0), vertices=16), knob))
+    for side in (1, -1):
+        parts.append(with_material(tube(f"antenna{side}", [(0, 2.0, 9.0), (side * 3.5, 3.0, 15.0)], [0.08, 0.05]), knob))
+    return [bake(join(parts, "crt_tv"), 1024, emissive=True)]
+
+
+def build_cassette():
+    """Giant cassette tape, 6 (X) x 4 (Y) x 0.8 tall, lying flat, label up. Origin at bottom centre."""
+    shell = plastic("cassette_shell", (0.08, 0.08, 0.1), rough=0.3)
+    label = Mat("cassette_label")
+    y = label.axis("Y")
+    label.color(label.ramp(label.math("FRACT", label.math("DIVIDE", label.math("ADD", y, 1.4), 2.8)),
+                           [(0.0, (0.95, 0.4, 0.6)), (0.3, (0.95, 0.85, 0.3)), (0.6, (0.3, 0.8, 0.85))], "CONSTANT"))
+    label.roughness(0.6)
+    reel = plastic("cassette_reel", (0.9, 0.9, 0.92), rough=0.3)
+    parts = [with_material(box("shell", (6.0, 4.0, 0.8), (0, 0, 0.4), bevel=0.15, segments=2), shell),
+             with_material(box("label", (5.0, 2.8, 0.04), (0, 0.3, 0.82)), label),
+             with_material(box("window", (2.6, 0.9, 0.05), (0, 0.2, 0.85)), shell)]
+    for x in (-0.9, 0.9):
+        parts.append(with_material(cylinder(f"reel{x}", 0.35, 0.06, (x, 0.2, 0.86), vertices=16), reel))
+    return [bake(join(parts, "cassette"), 512)]
+
+
+def build_boombox():
+    """Silver boombox, 18 (X) x 5 (Y) x 7 tall plus handle, speakers facing -Y."""
+    silver = metal("boombox_silver", (0.7, 0.71, 0.73), rough=0.35, brushed_axis="X")
+    black = plastic("boombox_black", (0.03, 0.03, 0.035), rough=0.5)
+    cone = plastic("speaker_cone", (0.08, 0.08, 0.09), rough=0.7)
+    parts = [with_material(box("body", (18.0, 5.0, 7.0), (0, 0, 3.5), bevel=0.5, segments=3), silver),
+             with_material(box("deck", (4.5, 0.3, 3.0), (0, -2.5, 3.8), bevel=0.15), black),
+             with_material(tube("handle", [(-7.0, 0, 7.0), (-6.0, 0, 8.6), (6.0, 0, 8.6), (7.0, 0, 7.0)], [0.35, 0.35, 0.35, 0.35]), black)]
+    for x in (-5.8, 5.8):
+        parts.append(with_material(cylinder(f"grille{x}", 2.8, 0.3, (x, -2.5, 3.5), rot=(math.pi / 2, 0, 0), vertices=32), black))
+        parts.append(with_material(sphere(f"cone{x}", 2.3, (x, -2.4, 3.5), (1.0, 0.25, 1.0), 24, 12), cone))
+    return [bake(join(parts, "boombox"), 1024)]
+
+
+def build_lava_lamp():
+    """Lava lamp, ~11 tall: chrome cone base and cap, glowing wax blobs in the glass. Origin at bottom."""
+    chrome = metal("lamp_chrome", (0.85, 0.86, 0.9), rough=0.1)
+    liquid = Mat("lamp_liquid")
+    liquid.color((0.6, 0.1, 0.4))
+    liquid.roughness(0.05)
+    liquid.emission((0.9, 0.25, 0.6), 1.5)
+    wax = glow("lamp_wax", (1.0, 0.45, 0.15), 4.0)
+    glass = lathe("glass", [(0.0, 3.5), (1.6, 3.5), (1.1, 9.0), (0.0, 9.0)], steps=32)
+    parts = [with_material(lathe("base", [(0.0, 0.0), (2.0, 0.0), (1.6, 3.5), (0.0, 3.5)], steps=32), chrome),
+             with_material(glass, liquid),
+             with_material(lathe("cap", [(0.0, 9.0), (1.15, 9.0), (0.6, 10.8), (0.0, 10.8)], steps=32), chrome)]
+    for i, (z, r, a) in enumerate(((4.4, 0.7, -1.9), (5.6, 0.45, 0.4), (6.9, 0.5, 2.6), (8.1, 0.35, -0.9))):
+        glass_r = 1.6 - 0.5 * (z - 3.5) / 5.5
+        reach = glass_r - r * 0.55
+        parts.append(with_material(sphere(f"blob{i}", r, (math.cos(a) * reach, math.sin(a) * reach, z), (1, 1, 1.4), 16, 10), wax))
+    return [bake(join(parts, "lava_lamp"), 1024, emissive=True)]
+
+
+def build_bed():
+    """Single bed, 20 (X) x 36 (Y), mattress top 8.6, pastel geometric duvet, headboard at +Y."""
+    frame = plastic("bed_frame", (0.85, 0.85, 0.88), rough=0.35)
+    duvet = Mat("duvet")
+    x, y = duvet.axis("X"), duvet.axis("Y")
+    zig = duvet.math("GREATER_THAN", duvet.math("FRACT", duvet.math("DIVIDE", duvet.math("ADD", y, duvet.math("ABSOLUTE", duvet.math("SUBTRACT",
+                     duvet.math("FRACT", duvet.math("DIVIDE", x, 3.0)), 0.5))), 3.0)), 0.5)
+    duvet.color(duvet.mix(zig, (0.25, 0.75, 0.78), (0.95, 0.45, 0.65)))
+    duvet.roughness(0.85)
+    duvet.normal(duvet.bump(duvet.noise(scale=3.0, detail=4.0), strength=0.3, distance=0.1))
+    duvet.set(("Sheen Weight", "Sheen"), 0.4)
+    pillow = fabric("pillow", (0.95, 0.93, 0.88), rough=0.8)
+    parts = [with_material(box("base", (20.0, 36.0, 4.0), (0, 0, 2.0), bevel=0.4, segments=2), frame),
+             with_material(box("mattress", (19.0, 33.0, 4.6), (0, -1.0, 6.3), bevel=1.0, segments=4), duvet),
+             with_material(box("headboard", (20.0, 1.5, 16.0), (0, 17.25, 8.0), bevel=0.6, segments=3), frame),
+             with_material(box("pillow", (14.0, 5.0, 2.0), (0, 13.0, 9.2), bevel=0.9, segments=4), pillow)]
+    return [bake(join(parts, "bed"), 2048)]
 
 
 MODELS = {
@@ -1451,6 +1944,31 @@ MODELS = {
     "back_counter": lambda: build_counter("back_counter", 120.0, 10.0, 14, 1),
     "fridge": build_fridge,
     "floor": build_floor_textures,
+    # The Study
+    "armchair": build_armchair,
+    "footstool": build_footstool,
+    "desk": build_desk,
+    "idol": build_idol,
+    "globe": build_globe,
+    "chest": build_chest,
+    "urn": build_urn,
+    "candle": build_candle,
+    "panel_wall": build_panel_wall,
+    "rug": build_rug,
+    "book_red": lambda: build_book("book_red", (0.32, 0.05, 0.03)),
+    "book_green": lambda: build_book("book_green", (0.06, 0.18, 0.08)),
+    "floor_walnut": lambda: build_floor_textures("floor_walnut", WALNUT, row_width=1.2, board_length=8.0),
+    # The Backrooms
+    "wallpaper": build_wallpaper_textures,
+    "carpet": build_carpet_textures,
+    # The 80s bedroom
+    "memphis": build_memphis_carpet_textures,
+    "rubiks_cube": build_rubiks_cube,
+    "crt_tv": build_crt_tv,
+    "cassette": build_cassette,
+    "boombox": build_boombox,
+    "lava_lamp": build_lava_lamp,
+    "bed": build_bed,
 }
 
 
