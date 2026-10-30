@@ -39,9 +39,10 @@ namespace BulletHeaven.Unity.Editor
             {
                 EnsureRenderPipeline();
                 EnsureLegacyInput();
-                bool missing = !File.Exists(CoreDll) || !Directory.Exists(Path.Combine(Application.dataPath, "Resources", "Models"));
-                if (missing)
+                if (!File.Exists(CoreDll))
                     Sync();
+                else if (!Directory.Exists(Path.Combine(Application.dataPath, "Resources", "Models")))
+                    CopyAssets(); // the DLLs are committed; just bring the models in
                 else if (CoreIsStale())
                     Debug.LogWarning("Bullet Heaven: ../core has changed since Assets/Plugins/Core was built. Use Bullet Heaven > Sync core + models.");
             };
@@ -68,11 +69,18 @@ namespace BulletHeaven.Unity.Editor
         public static bool Sync()
         {
             bool ok = BuildCore();
+            CopyAssets();
+            Debug.Log(ok ? "Bullet Heaven: core and models synced." : "Bullet Heaven: core build FAILED, see the log above.");
+            return ok;
+        }
+
+        /// <summary>Copies the generated models and textures from ../assets into Assets/Resources.</summary>
+        private static void CopyAssets()
+        {
             CopyFolder(Path.Combine(RepoRoot, "assets", "models"), Path.Combine(Application.dataPath, "Resources", "Models"), "*.glb");
             CopyFolder(Path.Combine(RepoRoot, "assets", "textures"), Path.Combine(Application.dataPath, "Resources", "Textures"), "*.jpg");
             AssetDatabase.Refresh();
-            Debug.Log(ok ? "Bullet Heaven: core and models synced." : "Bullet Heaven: core build FAILED, see the log above.");
-            return ok;
+            Debug.Log("Bullet Heaven: models and textures copied into Assets/Resources.");
         }
 
         private static string CoreDll => Path.Combine(Application.dataPath, "Plugins", "Core", "BulletHeaven.Core.dll");
@@ -189,6 +197,8 @@ namespace BulletHeaven.Unity.Editor
                 QualitySettings.SetQualityLevel(i, false);
                 QualitySettings.renderPipeline = asset;
             }
+            // Write ProjectSettings now, so the switch survives even if the editor goes down afterwards.
+            AssetDatabase.SaveAssets();
             Debug.Log("Bullet Heaven: created Assets/Settings/URP.asset and made URP the render pipeline.");
         }
     }
