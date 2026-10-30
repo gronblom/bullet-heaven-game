@@ -171,7 +171,8 @@ public static class LevelView
             material = Materials.Plastic(floor.Fallback.ToGodot(), 0.6f);
         }
         var center = bounds.GetCenter();
-        parent.AddChild(new MeshInstance3D { Mesh = new PlaneMesh { Size = bounds.Size }, MaterialOverride = material, Position = new Vector3(center.X, 0f, center.Y) });
+        // A hair below zero: props stand at exactly 0, and coplanar faces flicker (z-fighting).
+        parent.AddChild(new MeshInstance3D { Mesh = new PlaneMesh { Size = bounds.Size }, MaterialOverride = material, Position = new Vector3(center.X, -0.02f, center.Y) });
     }
 
     /// <summary>Back and side walls just outside the play area (or wall panels), plus a low skirting on the camera side.</summary>

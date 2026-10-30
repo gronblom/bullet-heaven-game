@@ -33,6 +33,7 @@ namespace BulletHeaven.Unity
         private static readonly QueryDescription BlastQuery = new QueryDescription().WithAll<Blast, Position>();
         private static readonly QueryDescription PuddleQuery = new QueryDescription().WithAll<Puddle, Position>();
         private static readonly QueryDescription PickupQuery = new QueryDescription().WithAll<Pickup, Position>();
+    private static readonly QueryDescription PuffQuery = new QueryDescription().WithAll<SprayPuff, Position>();
 
         private World _world;
         private GameState _state;
@@ -48,7 +49,7 @@ namespace BulletHeaven.Unity
         private Material _sky;
         private Vector3 _cameraTarget;
         private GameUi _ui;
-        private InstancedBatch _ants, _beetles, _bullets, _gems, _orbs, _shells, _blasts, _puddles;
+        private InstancedBatch _ants, _beetles, _bullets, _gems, _orbs, _shells, _blasts, _puddles, _puffs;
         private LightningView _lightning;
         private readonly List<Vector3> _orbPositions = new List<Vector3>();
         private readonly Dictionary<Entity, Transform> _pickupViews = new Dictionary<Entity, Transform>();
@@ -137,6 +138,7 @@ namespace BulletHeaven.Unity
                 new EnemySteeringSystem(_world, _state),
                 new BossSystem(_world, _state),
                 new LiquidSystem(_world, _state),
+                new SpraySystem(_world, _state),
                 new MovementSystem(_world, _state),
                 new CollisionSystem(_world, _state),
                 new VerticalPhysicsSystem(_world, _state),
@@ -186,28 +188,27 @@ namespace BulletHeaven.Unity
         private void StartRun() =>
             _state.ShowMessage($"{_level.Name}\nWASD / arrows / stick to run, Space / A to jump\nEsc / Start: pause   F1-F3: switch level", 5f);
 
-        /// <summary>Run start: pick two of the three weapons, one card at a time.</summary>
+        /// <summary>Run start: pick two of the four weapons, one card at a time.</summary>
         private void ChooseLoadout()
         {
             _choosing = true;
-            var kinds = new List<WeaponKind> { WeaponKind.Minigun, WeaponKind.LightningWand, WeaponKind.SeedMortar };
+            var kinds = new List<WeaponKind>(Cards.Loadout);
             void Offer(string title)
             {
-                var cards = kinds.ConvertAll(k => (WeaponStats.Name(k), WeaponStats.Blurb(k)));
-                _ui.ShowCards(title, "1-3 / click / stick + A", cards, i =>
+                _ui.ShowCards(title, "1-4 / click / stick + A", Cards.Weapons(kinds), i =>
                 {
                     Arsenal.Grant(_world, kinds[i]);
                     kinds.RemoveAt(i);
-                    if (Arsenal.Carried(_world).Count < 2)
+                    if (Arsenal.Carried(_world).Count < Cards.LoadoutPicks)
                     {
-                        Offer("Pick your second weapon");
+                        Offer("PICK YOUR SECOND WEAPON");
                         return;
                     }
                     _choosing = false;
                     StartRun();
                 });
             }
-            Offer($"{_level.Name}\nPick your first weapon");
+            Offer("PICK YOUR FIRST WEAPON");
         }
 
         /// <summary>Level-up: pause and offer three modifiers.</summary>
@@ -223,7 +224,7 @@ namespace BulletHeaven.Unity
                 return;
             }
             _choosing = true;
-            var cards = offers.ConvertAll(m => (m.Weapon is WeaponKind kind ? $"{m.Name}\n({WeaponStats.Name(kind)})" : m.Name, m.Description));
+            var cards = offers.ConvertAll(m => Cards.Modifier(_state, m));
             _ui.ShowCards($"LEVEL {_state.Level}", "Pick one: 1-3 / click / stick + A", cards, i =>
             {
                 Modifiers.Pick(_world, _state, offers[i]);
@@ -238,8 +239,7 @@ namespace BulletHeaven.Unity
                 _ui.Close();
                 return;
             }
-            var cards = new List<(string, string)> { ("Resume", "Back to the bugs"), ("Restart", "Start this level over"), ("Kitchen", "Back to the first level") };
-            _ui.ShowCards("PAUSED", "Esc / Start to resume", cards, i =>
+            _ui.ShowCards("PAUSED", "Esc / Start to resume", Cards.Pause(), i =>
             {
                 if (i == 1)
                     Restart(_selectedLevel);
@@ -347,7 +347,7 @@ namespace BulletHeaven.Unity
             var weapons = Arsenal.Carried(_world);
             float minigunSpin = weapons.Find(w => w.Kind == WeaponKind.Minigun).Spin; // default (0) if not carried
 
-            _runner.ShowWeapons(weapons.Exists(w => w.Kind == WeaponKind.Minigun), weapons.Exists(w => w.Kind == WeaponKind.LightningWand));
+            _runner.ShowWeapons(weapons);
             _runner.Sync(position, velocity, runner, elevation, health, minigunSpin, dt);
             _runner.SyncParachute(runner.Gliding, dt);
 
@@ -380,15 +380,17 @@ namespace BulletHeaven.Unity
             _ants = BugBatch(ModelLibrary.Ant, new Color(0.45f, 0.08f, 0.05f));
             _beetles = BugBatch(ModelLibrary.Beetle, new Color(0.35f, 0.15f, 0.06f));
             _bullets = new InstancedBatch(Meshes.Sphere, Looks.Glow(new Color(1f, 0.75f, 0.3f), 4f), castShadows: false);
+            // Amber sugar crystals: the model's own baked colours and warm inner glow.
             var gem = ModelLibrary.LoadMesh(ModelLibrary.Gem);
-            var gemGlow = Looks.Glow(new Color(0.3f, 1f, 0.5f), 1.5f);
-            _gems = gem != null ? new InstancedBatch(gem.Mesh, Array.ConvertAll(gem.Materials, _ => gemGlow), gem.Fit, castShadows: false)
-                : new InstancedBatch(Meshes.Cube, gemGlow, castShadows: false);
+            _gems = gem != null ? new InstancedBatch(gem.Mesh, gem.Materials, gem.Fit, castShadows: false)
+                : new InstancedBatch(Meshes.Cube, Looks.Glow(new Color(1f, 0.6f, 0.2f), 1.2f), castShadows: false);
             _orbs = new InstancedBatch(Meshes.Sphere, Looks.Glow(new Color(0.55f, 0.85f, 1f), 6f), castShadows: false);
             _shells = new InstancedBatch(Meshes.Sphere, Looks.Plastic(new Color(0.45f, 0.3f, 0.12f), 0.6f));
             _blasts = new InstancedBatch(Meshes.Sphere, Looks.Additive(Color.white), castShadows: false, data0: "_Color");
             var puddle = new Material(Shader.Find("BulletHeaven/Puddle")) { enableInstancing = true };
             _puddles = new InstancedBatch(Meshes.Plane, puddle, castShadows: false, data0: "_Color", data1: "_Params");
+            var mist = new Material(Shader.Find("BulletHeaven/Mist")) { enableInstancing = true };
+            _puffs = new InstancedBatch(Meshes.Sphere, mist, castShadows: false, data0: "_Color");
         }
 
         /// <summary>The bug model through the walk-cycle shader, or a coloured blob if it isn't generated.</summary>
@@ -477,6 +479,17 @@ namespace BulletHeaven.Unity
                     new Vector4(1f, 0.6f - 0.3f * t, 0.2f, 0.8f * (1f - t)));
             });
             _blasts.Draw();
+
+            // Bug spray: pale, slightly green mist that swells and thins out.
+            _puffs.Begin();
+            _world.Query(in PuffQuery, (ref SprayPuff puff, ref Position p) =>
+            {
+                float t = puff.Age / puff.Lifetime;
+                float alpha = 0.35f * Mathf.Min(1f, t * 6f) * (1f - t);
+                _puffs.Add(Conv.World(p.Value, puff.Height), Quaternion.identity, Vector3.one * puff.Radius * 2f,
+                    new Vector4(0.85f, 0.95f, 0.8f, alpha));
+            });
+            _puffs.Draw();
         }
 
         private void DrawWorldItems()

@@ -1,3 +1,4 @@
+using System;
 using Arch.Core;
 using BulletHeaven.Numerics;
 
@@ -180,6 +181,7 @@ public enum WeaponKind : byte
     Minigun,
     LightningWand,
     SeedMortar,
+    BugSpray,
 }
 
 /// <summary>A weapon the player carries. Each is its own entity, so the player can carry several.
@@ -228,6 +230,20 @@ public struct Pickup
 {
     public PickupKind Kind;
     public float Height;
+}
+
+/// <summary>A puff of insecticide from the bug spray: drifts out, swells and fades, poisoning and
+/// slowing every bug inside it while it lasts.</summary>
+public struct SprayPuff
+{
+    public float Dps;        // damage per second to each bug inside
+    public float Age;
+    public float Lifetime;
+    public float StartRadius;
+    public float EndRadius;
+    public float Height;
+    public float Push;       // knockback away from the puff's path (Knockdown formula)
+    public readonly float Radius => StartRadius + (EndRadius - StartRadius) * MathF.Min(1f, Age / Lifetime);
 }
 
 /// <summary>Slow floating ball of lightning that zaps nearby bugs with chain lightning.</summary>

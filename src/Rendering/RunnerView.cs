@@ -1,5 +1,6 @@
 using System;
 using BulletHeaven.Ecs;
+using BulletHeaven.Systems;
 using Godot;
 
 namespace BulletHeaven.Rendering;
@@ -9,7 +10,7 @@ namespace BulletHeaven.Rendering;
 /// Pikmin-sized dude built from primitives. Either way he gets a procedural run cycle (swinging
 /// legs and arms; a model needs child nodes named LegL, LegR, ArmL and ArmR pivoted at hip and
 /// shoulder, which the Blender generator makes), a jump pose and a squash on landing.
-/// Carried weapons (minigun.glb, wand.glb) are held in his hands, the minigun's barrels spinning.
+/// Carried weapons (minigun.glb, wand.glb, spray_can.glb) are held in his hands, the minigun's barrels spinning.
 /// </summary>
 public sealed partial class RunnerView : Node3D
 {
@@ -20,8 +21,8 @@ public sealed partial class RunnerView : Node3D
     private readonly bool _modelLimbs;
     private float _phase;
     private float _squash;
-    private Node3D _minigun;
-    private Node3D _wand;
+    private readonly System.Collections.Generic.Dictionary<WeaponKind, Node3D> _held = new();
+    private readonly Node3D[] _inHand = new Node3D[2]; // what each hand (0 left, 1 right) holds
     private Node3D _barrels;
     private float _barrelAngle;
     private Node3D _canopy;
@@ -48,21 +49,33 @@ public sealed partial class RunnerView : Node3D
         }
     }
 
-    /// <summary>Shows the weapons being carried (minigun in the right hand, wand in the left).</summary>
-    public void ShowWeapons(bool minigun, bool wand)
+    /// <summary>
+    /// Puts the carried weapons in his hands: the minigun prefers the right hand, the wand the left,
+    /// the spray can whichever is free (the mortar has no hand-held model).
+    /// </summary>
+    public void ShowWeapons(System.Collections.Generic.List<WeaponSlot> weapons)
     {
-        if (minigun && _minigun == null)
+        foreach (var slot in weapons)
         {
-            _minigun = Hold("minigun", 1);
-            if (_minigun != null)
-                _barrels = ModelLibrary.FindNode(_minigun, "Barrels");
+            if (_held.ContainsKey(slot.Kind))
+                continue;
+            int hand = slot.Kind switch
+            {
+                WeaponKind.Minigun => _inHand[1] == null ? 1 : 0,
+                WeaponKind.LightningWand => _inHand[0] == null ? 0 : 1,
+                WeaponKind.BugSpray => _inHand[1] == null ? 1 : 0,
+                _ => -1,
+            };
+            Node3D model = null;
+            if (hand >= 0 && _inHand[hand] == null)
+                model = Hold(Cards.Icon(slot.Kind), hand);
+            _held[slot.Kind] = model;
+            if (model == null)
+                continue;
+            _inHand[hand] = model;
+            if (slot.Kind == WeaponKind.Minigun)
+                _barrels = ModelLibrary.FindNode(model, "Barrels");
         }
-        if (wand && _wand == null)
-            _wand = Hold("wand", 0);
-        if (_minigun != null)
-            _minigun.Visible = minigun;
-        if (_wand != null)
-            _wand.Visible = wand;
     }
 
     /// <summary>Opens the parachute canopy over his shoulders while gliding, folding it away on landing.</summary>
@@ -97,9 +110,9 @@ public sealed partial class RunnerView : Node3D
             return null;
         if (_modelLimbs)
         {
-            // Hand position relative to the shoulder pivot, in the model's own frame (facing +Z).
+            // The hand hangs 0.445 below the shoulder pivot, in the model's own frame (facing +Z).
             float side = arm == 0 ? 1f : -1f;
-            weapon.Node.Position = new Vector3(side * 0.06f, -0.35f, 0.03f);
+            weapon.Node.Position = new Vector3(side * 0.035f, -0.445f, 0.025f);
         }
         else
         {
@@ -132,9 +145,9 @@ public sealed partial class RunnerView : Node3D
             _arms[0].Rotation = new Vector3(-swing * 0.8f + airArms, 0f, 0f);
             _arms[1].Rotation = new Vector3(swing * 0.8f + airArms, 0f, 0f);
             // An armed hand stays forward, aiming, with just a little bob.
-            if (_wand is { Visible: true })
+            if (_inHand[0] != null)
                 _arms[0].Rotation = new Vector3(-0.35f - swing * 0.1f, 0f, 0f);
-            if (_minigun is { Visible: true })
+            if (_inHand[1] != null)
                 _arms[1].Rotation = new Vector3(-0.3f + swing * 0.1f, 0f, 0f);
         }
         else if (!_hasModel)

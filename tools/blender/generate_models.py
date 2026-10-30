@@ -60,6 +60,7 @@ def parse_args():
     parser.add_argument("--only", nargs="*", default=None)
     parser.add_argument("--preview", action="store_true")
     parser.add_argument("--draft", action="store_true")
+    parser.add_argument("--icons", action="store_true", help="also render a square icon with a transparent background into <out>/icons/")
     return parser.parse_args(argv)
 
 
@@ -750,16 +751,19 @@ def export(objects, name, subfolder="models"):
     print(f"  wrote {os.path.relpath(path, ARGS.out)} ({os.path.getsize(path) // 1024} KB)")
     if ARGS.preview:
         render_preview(objects, name)
+    if ARGS.icons:
+        render_preview(objects, name, icon=True)
 
 
-def render_preview(objects, name):
-    """Studio render for eyeballing a model (not used by the game)."""
+def render_preview(objects, name, icon=False):
+    """Studio render for eyeballing a model, or with icon=True a 256 px icon on a transparent
+    background for the game's menu cards (assets/icons/)."""
     lo = Vector((min(v[i] for o in objects for v in (o.matrix_world @ Vector(c) for c in o.bound_box)) for i in range(3)))
     hi = Vector((max(v[i] for o in objects for v in (o.matrix_world @ Vector(c) for c in o.bound_box)) for i in range(3)))
     center, extent = (lo + hi) / 2, (hi - lo).length
 
     camera = link(bpy.data.objects.new("PreviewCam", bpy.data.cameras.new("PreviewCam")))
-    camera.location = center + Vector((0.9, -1.4, 0.9)).normalized() * extent * 1.25
+    camera.location = center + Vector((0.9, -1.4, 0.9)).normalized() * extent * 1.4
     camera.rotation_euler = (center - camera.location).to_track_quat("-Z", "Y").to_euler()
     bpy.context.scene.camera = camera
     lights = []
@@ -778,11 +782,15 @@ def render_preview(objects, name):
 
     scene = bpy.context.scene
     scene.view_settings.view_transform = "Standard"  # neutral colours, close to what the textures hold
-    scene.render.resolution_x = scene.render.resolution_y = 480
-    scene.cycles.samples = 48
+    scene.render.resolution_x = scene.render.resolution_y = 256 if icon else 480
+    scene.cycles.samples = 64 if icon else 48
     scene.cycles.use_denoising = False  # not every Blender build ships the denoiser
-    scene.render.film_transparent = False
-    folder = os.path.join(ARGS.out, "previews")
+    scene.render.film_transparent = icon
+    scene.render.image_settings.color_mode = "RGBA" if icon else "RGB"
+    if icon:
+        camera.location = center + Vector((0.9, -1.4, 0.7)).normalized() * extent * 1.45
+        camera.rotation_euler = (center - camera.location).to_track_quat("-Z", "Y").to_euler()
+    folder = os.path.join(ARGS.out, "icons" if icon else "previews")
     os.makedirs(folder, exist_ok=True)
     scene.render.filepath = os.path.join(folder, name + ".png")
     bpy.ops.render.render(write_still=True)
@@ -878,68 +886,78 @@ def build_beetle():
 
 
 def build_runner():
-    """Chibi explorer, ~1.35 tall: fedora, leather jacket over a khaki shirt, satchel, boots.
-    Limbs stay separate objects (LegL/LegR/ArmL/ArmR) so the game can swing them."""
-    khaki = fabric("khaki", (0.5, 0.4, 0.24), rough=0.85)
-    jacket = leather("jacket", (0.3, 0.15, 0.07), rough=0.5)
-    boot = leather("boot", (0.16, 0.09, 0.05), rough=0.45)
+    """The hero, 1.35 tall with realistic proportions (about 7.5 heads), in the spirit of early-90s
+    cinematic platformers: short brown hair, a brown leather bomber jacket worn open over a white
+    T-shirt, blue jeans, brown boots, a holster belt.
+    Limbs stay separate objects (LegL/LegR/ArmL/ArmR) so the game can swing them; a hanging hand
+    sits about 0.47 below the shoulder pivot."""
+    jacket = leather("jacket", (0.32, 0.17, 0.08), rough=0.45)
+    collar = leather("collar", (0.22, 0.11, 0.05), rough=0.5)
+    tee = fabric("tee", (0.86, 0.85, 0.8), rough=0.9)
+    denim = Mat("denim")
+    twill = denim.wave("BANDS", "Z", scale=160.0, vector=denim.vec(scale=(1, 1, 1), offset=(0, 0, 0)))
+    denim.color(denim.mix(denim.math("MULTIPLY", denim.noise(scale=6.0, detail=6.0), 0.5),
+                          (0.12, 0.18, 0.32), (0.25, 0.32, 0.48)))
+    denim.roughness(0.85)
+    denim.normal(denim.bump(twill, strength=0.15, distance=0.004))
+    boot = leather("boot", (0.2, 0.11, 0.05), rough=0.45)
     sole = plastic("sole", (0.05, 0.04, 0.035), rough=0.8)
-    belt = leather("belt", (0.1, 0.06, 0.04), rough=0.4)
-    satchel = leather("satchel", (0.42, 0.27, 0.12), rough=0.6)
-    brass = metal("buckle", (0.85, 0.65, 0.3), rough=0.25)
-    face = skin("skin", (0.88, 0.62, 0.48))
-    eye_white = plastic("eye_white", (0.95, 0.95, 0.92), rough=0.1)
-    dark = plastic("pupil", (0.03, 0.02, 0.02), rough=0.05)
-    hair = fabric("hair", (0.18, 0.1, 0.05), rough=0.7)
-    felt = fabric("felt", (0.34, 0.22, 0.12), rough=0.9)
-    band = fabric("band", (0.08, 0.05, 0.04), rough=0.6)
-    scarf = fabric("scarf", (0.55, 0.06, 0.04), rough=0.8)
+    belt = leather("belt", (0.08, 0.05, 0.035), rough=0.4)
+    steel = metal("buckle", (0.7, 0.7, 0.72), rough=0.3)
+    face = skin("skin", (0.86, 0.64, 0.52))
+    hair = fabric("hair", (0.2, 0.11, 0.06), rough=0.65)
+    dark = plastic("eyes", (0.04, 0.03, 0.03), rough=0.1)
 
+    # Proportions (z up): feet 0, knees 0.37, hips 0.68, waist 0.8, chest 0.98, shoulders 1.1,
+    # chin 1.14, head top 1.35.
+    # Jacket: an egg tapered from broad shoulders to the waist, with the white tee showing down the front.
+    body = sphere("jacket_body", 0.15, (0, 0.01, 0.94), (1.2, 0.62, 1.42), 32, 18)
+    deform(body, lambda v: Vector((v.x * (0.78 + 0.32 * min(1.0, max(0.0, (v.z - 0.76) / 0.3))), v.y, v.z)))
     parts = [
-        # Torso: jacket with the shirt showing in a V at the front.
-        with_material(sphere("jacket", 0.215, (0, 0, 0.62), (1.02, 0.88, 1.2), 28, 16), jacket),
-        with_material(torus("neckerchief", 0.085, 0.03, (0, -0.02, 0.83), rot=(0.25, 0, 0), major_segments=20, minor_segments=8), scarf),
-        with_material(cylinder("belt", 0.205, 0.06, (0, 0, 0.44), vertices=28), belt),
-        with_material(box("buckle", (0.06, 0.02, 0.05), (0, -0.205, 0.44), bevel=0.008), brass),
-        with_material(tube("strap", [(-0.17, -0.12, 0.78), (0.0, -0.2, 0.62), (0.2, -0.12, 0.46)], [0.018, 0.018, 0.018]), satchel),
-        with_material(box("satchel", (0.08, 0.2, 0.17), (0.24, -0.02, 0.42), bevel=0.03, segments=3), satchel),
-        with_material(torus("whip", 0.06, 0.012, (-0.215, 0.02, 0.44), rot=(0, math.pi / 2, 0), major_segments=16, minor_segments=6), belt),
-        with_material(cylinder("neck", 0.07, 0.1, (0, -0.01, 0.84), vertices=16), face),
-        # Head and face.
-        with_material(sphere("head", 0.23, (0, -0.02, 1.02), (1.0, 0.95, 0.97), 32, 18), face),
-        with_material(sphere("nose", 0.035, (0, -0.245, 0.99), (1.0, 0.9, 1.0), 12, 8), face),
-        with_material(sphere("earL", 0.045, (0.225, -0.01, 1.0), (0.5, 1.0, 1.2), 10, 8), face),
-        with_material(sphere("earR", 0.045, (-0.225, -0.01, 1.0), (0.5, 1.0, 1.2), 10, 8), face),
-        with_material(sphere("hair", 0.225, (0, 0.04, 1.04), (1.02, 0.95, 0.9), 24, 12), hair),
-        with_material(tube("mouth", [(-0.04, -0.2, 0.93), (0, -0.208, 0.92), (0.04, -0.2, 0.93)], [0.007, 0.008, 0.007]), dark),
-        # Fedora: pinched crown, ribbon band, brim curled up at the sides.
-        with_material(cylinder("crown", 0.19, 0.17, (0, 0.0, 1.25), vertices=32, radius_top=0.16), felt),
-        with_material(cylinder("ribbon", 0.188, 0.045, (0, 0.0, 1.2), vertices=32, radius_top=0.182), band),
-        with_material(cylinder("brim", 0.36, 0.02, (0, 0.0, 1.17), vertices=40), felt),
+        with_material(body, jacket),
+        with_material(box("tee", (0.085, 0.02, 0.3), (0, -0.085, 0.95), bevel=0.02, segments=3), tee),
+        with_material(torus("jacket_collar", 0.058, 0.016, (0, 0.012, 1.115), rot=(0.25, 0, 0), major_segments=20, minor_segments=8), collar),
+        with_material(cylinder("belt", 0.125, 0.04, (0, 0, 0.73), vertices=24), belt),
+        with_material(box("buckle", (0.04, 0.012, 0.03), (0, -0.112, 0.73), bevel=0.004), steel),
+        with_material(box("holster", (0.04, 0.06, 0.12), (-0.135, 0.0, 0.67), bevel=0.012, segments=2), belt),
+        with_material(sphere("hips", 0.13, (0, 0, 0.7), (1.0, 0.72, 0.6), 20, 10), denim.mat),
+        with_material(cylinder("neck", 0.04, 0.08, (0, 0.0, 1.14), vertices=16), face),
+        # Head: slightly long face, short swept hair with a side parting.
+        with_material(sphere("head", 0.085, (0, -0.005, 1.25), (0.88, 0.98, 1.12), 28, 16), face),
+        with_material(sphere("jaw", 0.06, (0, -0.03, 1.195), (1.0, 0.9, 0.7), 16, 10), face),
+        with_material(sphere("nose", 0.014, (0, -0.088, 1.245), (0.8, 1.0, 1.5), 10, 8), face),
+        # Short hair: a cap over the top and back of the skull, a little swept-up fringe at the front.
+        with_material(sphere("hair", 0.09, (0.0, 0.012, 1.272), (0.93, 1.0, 0.92), 24, 12), hair),
+        with_material(sphere("fringe", 0.035, (0.015, -0.06, 1.322), (1.5, 0.9, 0.55), 14, 8, rot=(0.35, 0, 0.15)), hair),
     ]
-    crown, brim = parts[-3], parts[-1]
-    deform(crown, lambda v: Vector((v.x * (1 - 0.15 * max(0, -v.y) / 0.19), v.y, v.z - (0.04 * math.exp(-(v.x * v.x) / 0.004) if v.z > 1.3 else 0))))
-    deform(brim, lambda v: Vector((v.x, v.y, v.z + 0.07 * (v.x / 0.36) ** 2 - 0.02 * max(0, -v.y / 0.36))))
+    hair_obj = parts[-2]
+    # Cut the cap off below a line that rises from the nape to the forehead, so the face stays clear.
+    deform(hair_obj, lambda v: Vector((v.x, v.y, max(v.z, 1.21 + 0.09 * max(0.0, min(1.0, (0.05 - v.y) / 0.13))))))
     for side in (1, -1):
-        parts.append(with_material(sphere(f"white{side}", 0.045, (side * 0.08, -0.195, 1.03), (1.0, 0.6, 1.1), 14, 10), eye_white))
-        parts.append(with_material(sphere(f"pupil{side}", 0.026, (side * 0.08, -0.225, 1.025), (1.0, 0.5, 1.1), 12, 8), dark))
-        parts.append(with_material(tube(f"brow{side}", [(side * 0.04, -0.215, 1.09), (side * 0.08, -0.22, 1.1), (side * 0.12, -0.21, 1.085)],
-                                        [0.011, 0.013, 0.01]), hair))
+        parts.append(with_material(sphere(f"eye{side}", 0.011, (side * 0.03, -0.077, 1.262), (1.0, 0.6, 0.7), 10, 6), dark))
+        parts.append(with_material(tube(f"brow{side}", [(side * 0.015, -0.08, 1.285), (side * 0.045, -0.077, 1.287)], [0.006, 0.005]), hair))
+        parts.append(with_material(sphere(f"ear{side}", 0.018, (side * 0.077, 0.0, 1.25), (0.5, 0.9, 1.3), 10, 8), face))
+        # Jacket fronts hanging open either side of the white tee, closing in towards the collar.
+        parts.append(with_material(box(f"lapel{side}", (0.035, 0.02, 0.26), (side * 0.058, -0.087, 0.96), bevel=0.006, segments=2,
+                                       rot=(0, -side * 0.12, 0)), collar))
     torso = tag(join(parts, "Body"), "Body")
 
     limbs = []
     for side, suffix in ((1, "L"), (-1, "R")):
         leg = join([
-            with_material(tube(f"trouser{suffix}", [(side * 0.1, 0, 0.44), (side * 0.1, -0.01, 0.16)], [0.08, 0.07]), khaki),
-            with_material(box(f"boot{suffix}", (0.14, 0.24, 0.13), (side * 0.1, -0.035, 0.085), bevel=0.045, segments=3), boot),
-            with_material(box(f"sole{suffix}", (0.15, 0.26, 0.035), (side * 0.1, -0.035, 0.018), bevel=0.012, segments=2), sole),
+            with_material(tube(f"jeans{suffix}", [(side * 0.07, 0, 0.7), (side * 0.072, -0.01, 0.37), (side * 0.072, 0.0, 0.1)],
+                               [0.062, 0.048, 0.042]), denim.mat),
+            with_material(box(f"boot{suffix}", (0.085, 0.19, 0.1), (side * 0.072, -0.035, 0.06), bevel=0.03, segments=3), boot),
+            with_material(box(f"sole{suffix}", (0.09, 0.2, 0.025), (side * 0.072, -0.035, 0.012), bevel=0.008, segments=2), sole),
         ], f"Leg{suffix}")
         tag(leg, f"Leg{suffix}")
         arm = join([
-            with_material(tube(f"sleeve{suffix}", [(side * 0.21, 0, 0.75), (side * 0.27, 0, 0.56), (side * 0.27, -0.03, 0.44)],
-                               [0.06, 0.055, 0.05]), jacket),
-            with_material(sphere(f"hand{suffix}", 0.052, (side * 0.27, -0.035, 0.39), (1.0, 1.0, 1.15), 14, 10), face),
-            with_material(sphere(f"thumb{suffix}", 0.022, (side * 0.245, -0.075, 0.41), segments=10, rings=6), face),
+            with_material(sphere(f"deltoid{suffix}", 0.046, (side * 0.17, 0.005, 1.06), (1.0, 1.0, 0.9), 16, 10), jacket),
+            with_material(tube(f"sleeve{suffix}", [(side * 0.185, 0, 1.05), (side * 0.2, 0.01, 0.86), (side * 0.205, -0.02, 0.69)],
+                               [0.046, 0.042, 0.038]), jacket),
+            with_material(cylinder(f"cuff{suffix}", 0.04, 0.03, (side * 0.205, -0.02, 0.68), vertices=14), collar),
+            with_material(sphere(f"hand{suffix}", 0.032, (side * 0.205, -0.025, 0.635), (0.85, 1.0, 1.3), 12, 8), face),
+            with_material(sphere(f"thumb{suffix}", 0.013, (side * 0.19, -0.05, 0.65), segments=8, rings=6), face),
         ], f"Arm{suffix}")
         tag(arm, f"Arm{suffix}")
         limbs += [leg, arm]
@@ -948,16 +966,17 @@ def build_runner():
     bake(runner, 2048)
 
     # Split the limbs back out with their pivots at hip / shoulder.
-    return split_parts(runner, {"LegL": (0.1, 0, 0.44), "LegR": (-0.1, 0, 0.44),
-                                "ArmL": (0.21, 0, 0.75), "ArmR": (-0.21, 0, 0.75)})
+    return split_parts(runner, {"LegL": (0.07, 0, 0.7), "LegR": (-0.07, 0, 0.7),
+                                "ArmL": (0.17, 0, 1.08), "ArmR": (-0.17, 0, 1.08)})
 
 
 def build_gem():
+    """XP crystal: a cut amber sugar crystal with a warm inner glow (not neon)."""
     gem = Mat("gem")
     facets = gem.voronoi(scale=6.0)
-    gem.color(gem.ramp(facets, [(0.0, (0.15, 1.0, 0.45)), (1.0, (0.02, 0.5, 0.2))]))
-    gem.roughness(0.05)
-    gem.emission((0.2, 1.0, 0.45), 2.5)
+    gem.color(gem.ramp(facets, [(0.0, (1.0, 0.72, 0.3)), (1.0, (0.55, 0.22, 0.03))]))
+    gem.roughness(0.08)
+    gem.emission((1.0, 0.55, 0.15), 0.9)
     bpy.ops.mesh.primitive_ico_sphere_add(subdivisions=1, radius=0.5, location=(0, 0, 0.7))
     obj = bpy.context.active_object
     obj.name = "gem"
@@ -1878,6 +1897,44 @@ def build_watering_can():
     return [bake(join(parts, "watering_can"), 1024)]
 
 
+def build_spray_can():
+    """Bug spray at the runner's scale: an aerosol can held in the hand, nozzle forward (-Y). Grip at the origin."""
+    tin = Mat("spray_tin")
+    stripe = tin.math("GREATER_THAN", tin.math("ABSOLUTE", tin.math("SUBTRACT", tin.axis("Y"), -0.02)), 0.05)
+    tin.color(tin.mix(stripe, (0.85, 0.12, 0.08), (0.95, 0.78, 0.1)))  # yellow can, red label band
+    tin.roughness(0.3)
+    tin.metal(0.4)
+    cap = plastic("spray_cap", (0.92, 0.92, 0.9), rough=0.35)
+    nozzle = plastic("spray_nozzle", (0.08, 0.08, 0.08), rough=0.4)
+    rot = (math.pi / 2, 0, 0)
+    parts = [
+        with_material(cylinder("can", 0.042, 0.2, (0, -0.02, 0.0), rot=rot, vertices=24), tin.mat),
+        with_material(cylinder("shoulder", 0.042, 0.03, (0, -0.135, 0.0), rot=rot, vertices=24, radius_top=0.028), tin.mat),
+        with_material(cylinder("cap", 0.026, 0.035, (0, -0.165, 0.0), rot=rot, vertices=16), cap),
+        with_material(box("nozzle", (0.015, 0.02, 0.012), (0, -0.19, 0.012), bevel=0.003), nozzle),
+    ]
+    return [bake(join(parts, "SprayCan"), 512)]
+
+
+def build_mortar():
+    """Seed mortar: a short olive tube on a tripod, shells stacked beside it. About 0.6 long (icon / props)."""
+    olive = metal("mortar_olive", (0.25, 0.3, 0.14), rough=0.55)
+    steel = metal("mortar_steel", (0.4, 0.4, 0.42), rough=0.35)
+    seed = Mat("mortar_seed")
+    seed.color(seed.ramp(seed.noise(scale=8.0), [(0.3, (0.35, 0.2, 0.08)), (0.7, (0.55, 0.35, 0.15))]))
+    seed.roughness(0.5)
+    tube_obj = cylinder("tube", 0.06, 0.5, (0, -0.1, 0.3), rot=(math.radians(50), 0, 0), vertices=24)
+    parts = [
+        with_material(tube_obj, olive),
+        with_material(cylinder("base", 0.14, 0.03, (0, 0.1, 0.015), vertices=24), steel),
+        with_material(tube("leg1", [(0, -0.15, 0.32), (0.12, -0.3, 0.0)], [0.012, 0.012]), steel),
+        with_material(tube("leg2", [(0, -0.15, 0.32), (-0.12, -0.3, 0.0)], [0.012, 0.012]), steel),
+    ]
+    for i in range(3):
+        parts.append(with_material(sphere(f"seed{i}", 0.045, (0.2 + i * 0.07, 0.12, 0.04), (0.8, 0.8, 1.2), 12, 8), seed.mat))
+    return [bake(join(parts, "mortar"), 512)]
+
+
 MODELS = {
     "ant": build_ant,
     "beetle": build_beetle,
@@ -1892,6 +1949,8 @@ MODELS = {
     "cherries": build_cherries,
     "wand": build_wand,
     "minigun": build_minigun,
+    "spray_can": build_spray_can,
+    "mortar": build_mortar,
     "stool": build_stool,
     "toy_block": build_toy_block,
     "ball": build_ball,

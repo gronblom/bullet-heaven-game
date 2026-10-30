@@ -91,6 +91,13 @@ public static class Modifiers
         Weapon(WeaponKind.SeedMortar, "Big bang", "Bigger blasts", 3, (ref WeaponSlot w) => w.Area++),
         Weapon(WeaponKind.SeedMortar, "Sticky jam", "Blasts leave jam that slows bugs", 1, (ref WeaponSlot w) => w.Special++),
 
+        Weapon(WeaponKind.BugSpray, "Industrial strength", "Spray poison +40%", 3, (ref WeaponSlot w) => w.Damage++),
+        Weapon(WeaponKind.BugSpray, "Rapid pump", "Sprays 25% faster", 3, (ref WeaponSlot w) => w.Rate++),
+        Weapon(WeaponKind.BugSpray, "Wide nozzle", "More mist in a wider cone", 2, (ref WeaponSlot w) => w.Count++),
+        Weapon(WeaponKind.BugSpray, "Pressure boost", "Reaches further, bigger clouds", 2, (ref WeaponSlot w) => w.Area++),
+        Weapon(WeaponKind.BugSpray, "Knockdown formula", "Mist pushes bugs back", 2, (ref WeaponSlot w) => w.Pierce++),
+        Weapon(WeaponKind.BugSpray, "Lingering cloud", "Mist hangs around much longer", 1, (ref WeaponSlot w) => w.Special++),
+
         new("Thick skin", "+25 max health, heal 40", null, 3, (world, state) =>
         {
             ref var health = ref world.Get<Health>(state.Player);

@@ -41,7 +41,7 @@ namespace BulletHeaven.Unity.Editor
                 EnsureLegacyInput();
                 if (!File.Exists(CoreDll))
                     Sync();
-                else if (!Directory.Exists(Path.Combine(Application.dataPath, "Resources", "Models")))
+                else if (!Directory.Exists(Path.Combine(Application.dataPath, "Resources", "Icons")) || ModelsOutdated())
                     CopyAssets(); // the DLLs are committed; just bring the models in
                 else if (CoreIsStale())
                     Debug.LogWarning("Bullet Heaven: ../core has changed since Assets/Plugins/Core was built. Use Bullet Heaven > Sync core + models.");
@@ -79,8 +79,27 @@ namespace BulletHeaven.Unity.Editor
         {
             CopyFolder(Path.Combine(RepoRoot, "assets", "models"), Path.Combine(Application.dataPath, "Resources", "Models"), "*.glb");
             CopyFolder(Path.Combine(RepoRoot, "assets", "textures"), Path.Combine(Application.dataPath, "Resources", "Textures"), "*.jpg");
+            CopyFolder(Path.Combine(RepoRoot, "assets", "icons"), Path.Combine(Application.dataPath, "Resources", "Icons"), "*.png");
             AssetDatabase.Refresh();
-            Debug.Log("Bullet Heaven: models and textures copied into Assets/Resources.");
+            Debug.Log("Bullet Heaven: models, textures and icons copied into Assets/Resources.");
+        }
+
+        /// <summary>True when ../assets has models or icons newer than the copies in Resources (after a git pull).</summary>
+        private static bool ModelsOutdated()
+        {
+            foreach (var (folder, pattern, target) in new[] { ("models", "*.glb", "Models"), ("icons", "*.png", "Icons"), ("textures", "*.jpg", "Textures") })
+            {
+                string from = Path.Combine(RepoRoot, "assets", folder);
+                if (!Directory.Exists(from))
+                    continue;
+                foreach (var file in Directory.GetFiles(from, pattern))
+                {
+                    string copy = Path.Combine(Application.dataPath, "Resources", target, Path.GetFileName(file));
+                    if (!File.Exists(copy) || File.GetLastWriteTimeUtc(file) > File.GetLastWriteTimeUtc(copy))
+                        return true;
+                }
+            }
+            return false;
         }
 
         private static string CoreDll => Path.Combine(Application.dataPath, "Plugins", "Core", "BulletHeaven.Core.dll");

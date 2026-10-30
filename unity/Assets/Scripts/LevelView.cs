@@ -145,7 +145,8 @@ namespace BulletHeaven.Unity
             }
             var center = bounds.GetCenter();
             var go = MeshObject("Floor", Meshes.Plane, material, parent, false);
-            go.transform.localPosition = Conv.World(center, 0f);
+            // A hair below zero: props stand at exactly 0, and coplanar faces flicker (z-fighting).
+            go.transform.localPosition = Conv.World(center, -0.02f);
             go.transform.localScale = new Vector3(bounds.Size.X, 1f, bounds.Size.Y);
         }
 

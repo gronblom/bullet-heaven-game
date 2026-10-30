@@ -17,10 +17,10 @@ public static class GameInput
     public const string RunnerJump = "runner_jump"; // A is free when not driving
     public const string Restart = "restart";
     public const string Pause = "pause";
-    /// <summary>1-3: pick a card in a menu.</summary>
-    public static readonly string[] Choices = { "choice_1", "choice_2", "choice_3" };
-    /// <summary>Shift + 1-3: add the minigun, wand or mortar (development).</summary>
-    public static readonly string[] DebugWeapons = { "debug_weapon_1", "debug_weapon_2", "debug_weapon_3" };
+    /// <summary>1-4: pick a card in a menu.</summary>
+    public static readonly string[] Choices = { "choice_1", "choice_2", "choice_3", "choice_4" };
+    /// <summary>Shift + 1-4: add the minigun, wand, mortar or bug spray (development).</summary>
+    public static readonly string[] DebugWeapons = { "debug_weapon_1", "debug_weapon_2", "debug_weapon_3", "debug_weapon_4" };
     /// <summary>F1-F3: jump straight to a level (development).</summary>
     public static readonly string[] Levels = { "level_1", "level_2", "level_3" };
 

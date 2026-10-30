@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using BulletHeaven.Ecs;
+using BulletHeaven.Systems;
 using UnityEngine;
 
 namespace BulletHeaven.Unity
@@ -19,8 +20,8 @@ namespace BulletHeaven.Unity
         private bool _modelLimbs;
         private float _phase;
         private float _squash;
-        private GameObject _minigun;
-        private GameObject _wand;
+        private readonly Dictionary<WeaponKind, GameObject> _held = new Dictionary<WeaponKind, GameObject>();
+        private readonly GameObject[] _inHand = new GameObject[2]; // what each hand (0 left, 1 right) holds
         private Transform _barrels;
         private float _barrelAngle;
         private Transform _canopy;
@@ -76,21 +77,33 @@ namespace BulletHeaven.Unity
             go.transform.localScale = scale;
         }
 
-        /// <summary>Shows the weapons being carried (minigun in the right hand, wand in the left).</summary>
-        public void ShowWeapons(bool minigun, bool wand)
+        /// <summary>
+        /// Puts the carried weapons in his hands: the minigun prefers the right hand, the wand the left,
+        /// the spray can whichever is free (the mortar has no hand-held model).
+        /// </summary>
+        public void ShowWeapons(List<WeaponSlot> weapons)
         {
-            if (minigun && _minigun == null)
+            foreach (var slot in weapons)
             {
-                _minigun = Hold("minigun", 1);
-                if (_minigun != null)
-                    _barrels = ModelLibrary.FindNode(_minigun.transform, "Barrels");
+                if (_held.ContainsKey(slot.Kind))
+                    continue;
+                int hand = slot.Kind switch
+                {
+                    WeaponKind.Minigun => _inHand[1] == null ? 1 : 0,
+                    WeaponKind.LightningWand => _inHand[0] == null ? 0 : 1,
+                    WeaponKind.BugSpray => _inHand[1] == null ? 1 : 0,
+                    _ => -1,
+                };
+                GameObject model = null;
+                if (hand >= 0 && _inHand[hand] == null)
+                    model = Hold(Cards.Icon(slot.Kind), hand);
+                _held[slot.Kind] = model;
+                if (model == null)
+                    continue;
+                _inHand[hand] = model;
+                if (slot.Kind == WeaponKind.Minigun)
+                    _barrels = ModelLibrary.FindNode(model.transform, "Barrels");
             }
-            if (wand && _wand == null)
-                _wand = Hold("wand", 0);
-            if (_minigun != null)
-                _minigun.SetActive(minigun);
-            if (_wand != null)
-                _wand.SetActive(wand);
         }
 
         private GameObject Hold(string name, int arm)
@@ -102,9 +115,9 @@ namespace BulletHeaven.Unity
             if (weapon == null)
                 return null;
             weapon.transform.SetParent(_arms[arm], false);
-            // Hand position relative to the shoulder pivot in the model's frame (Godot's, mirrored on X).
+            // The hand hangs 0.445 below the shoulder pivot (model frame, Godot's mirrored on X).
             float side = arm == 0 ? 1f : -1f;
-            weapon.transform.localPosition = new Vector3(-side * 0.06f, -0.35f, 0.03f);
+            weapon.transform.localPosition = new Vector3(-side * 0.035f, -0.445f, 0.025f);
             _renderers = GetComponentsInChildren<Renderer>(true);
             return weapon;
         }
@@ -127,8 +140,9 @@ namespace BulletHeaven.Unity
                 float airArms = elevation.Grounded ? 0f : -1.4f;
                 Swing(_legs[0], _legRest[0], swing + airLegs);
                 Swing(_legs[1], _legRest[1], -swing + airLegs * 0.5f);
-                Swing(_arms[0], _armRest[0], _wand != null && _wand.activeSelf ? -0.35f - swing * 0.1f : -swing * 0.8f + airArms);
-                Swing(_arms[1], _armRest[1], _minigun != null && _minigun.activeSelf ? -0.3f + swing * 0.1f : swing * 0.8f + airArms);
+                // An armed hand stays forward, aiming, with just a little bob.
+                Swing(_arms[0], _armRest[0], _inHand[0] != null ? -0.35f - swing * 0.1f : -swing * 0.8f + airArms);
+                Swing(_arms[1], _armRest[1], _inHand[1] != null ? -0.3f + swing * 0.1f : swing * 0.8f + airArms);
             }
 
             if (_barrels != null)

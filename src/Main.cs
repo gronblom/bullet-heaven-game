@@ -40,6 +40,7 @@ public partial class Main : Node3D
     private static readonly QueryDescription BlastQuery = new QueryDescription().WithAll<Blast, Position>();
     private static readonly QueryDescription PuddleQuery = new QueryDescription().WithAll<Puddle, Position>();
     private static readonly QueryDescription PickupQuery = new QueryDescription().WithAll<Pickup, Position>();
+    private static readonly QueryDescription PuffQuery = new QueryDescription().WithAll<SprayPuff, Position>();
 
     private World _world;
     private GameState _state;
@@ -55,6 +56,7 @@ public partial class Main : Node3D
     private Overlay _overlay;
     private bool _choosing; // a loadout or level-up menu is open (pause can't close it)
     private InstancedRenderer _puddleRenderer;
+    private InstancedRenderer _puffRenderer;
     private readonly Dictionary<Entity, Node3D> _pickupViews = new();
     private InstancedRenderer _antRenderer;
     private InstancedRenderer _beetleRenderer;
@@ -119,7 +121,7 @@ public partial class Main : Node3D
             Materials.InstanceColored(0.35f), ModelLibrary.Beetle, animationShader: bugShader);
         _bulletRenderer = new InstancedRenderer(this, new SphereMesh { Radius = 1f, Height = 2f, RadialSegments = 8, Rings = 4 },
             Materials.Glow(new Color(1f, 0.75f, 0.3f), 4f), castShadows: false);
-        _gemRenderer = new InstancedRenderer(this, new BoxMesh(), Materials.Glow(new Color(0.3f, 1f, 0.5f), 1.5f),
+        _gemRenderer = new InstancedRenderer(this, new BoxMesh(), Materials.Glow(new Color(1f, 0.6f, 0.2f), 1.2f), // amber sugar crystals
             ModelLibrary.Gem, castShadows: false);
         _orbRenderer = new InstancedRenderer(this, new SphereMesh { Radius = 1f, Height = 2f },
             Materials.Glow(new Color(0.55f, 0.85f, 1f), 6f), castShadows: false);
@@ -135,6 +137,8 @@ public partial class Main : Node3D
         _lightning = new LightningRenderer(this);
         var puddleMaterial = new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/puddle.gdshader") };
         _puddleRenderer = new InstancedRenderer(this, new PlaneMesh { Size = Vector2.One * 2f }, puddleMaterial, castShadows: false);
+        _puffRenderer = new InstancedRenderer(this, new SphereMesh { Radius = 1f, Height = 2f, RadialSegments = 12, Rings = 6 },
+            new ShaderMaterial { Shader = GD.Load<Shader>("res://shaders/mist.gdshader") }, castShadows: false);
         foreach (var (entity, height, at) in Pickups())
         {
             var view = ModelLibrary.LoadProp("parachute")?.Node ?? new MeshInstance3D
@@ -161,6 +165,7 @@ public partial class Main : Node3D
             new EnemySteeringSystem(_world, _state),
             new BossSystem(_world, _state),
             new LiquidSystem(_world, _state),
+            new SpraySystem(_world, _state),
             new MovementSystem(_world, _state),
             new CollisionSystem(_world, _state),
             new VerticalPhysicsSystem(_world, _state),
@@ -195,28 +200,27 @@ public partial class Main : Node3D
             ? "WASD / arrows to drive, Shift to drift, Space to jump"
             : "WASD / arrows / stick to run, Space / A to jump") + "\nEsc / Start: pause   F1-F3: switch level", 5f);
 
-    /// <summary>Run start: pick two of the three weapons, one card at a time.</summary>
+    /// <summary>Run start: pick two of the four weapons, one card at a time.</summary>
     private void ChooseLoadout()
     {
         _choosing = true;
-        var kinds = new List<WeaponKind> { WeaponKind.Minigun, WeaponKind.LightningWand, WeaponKind.SeedMortar };
+        var kinds = new List<WeaponKind>(Cards.Loadout);
         void Offer(string title)
         {
-            var cards = kinds.ConvertAll(k => (WeaponStats.Name(k), WeaponStats.Blurb(k)));
-            _overlay.ShowCards(title, "1-3 / click / d-pad + A", cards, i =>
+            _overlay.ShowCards(title, "1-4 / click / d-pad + A", Cards.Weapons(kinds), i =>
             {
                 Arsenal.Grant(_world, kinds[i]);
                 kinds.RemoveAt(i);
-                if (Arsenal.Carried(_world).Count < 2)
+                if (Arsenal.Carried(_world).Count < Cards.LoadoutPicks)
                 {
-                    Offer("Pick your second weapon");
+                    Offer("PICK YOUR SECOND WEAPON");
                     return;
                 }
                 _choosing = false;
                 StartRun();
             });
         }
-        Offer($"{_level.Name}\nPick your first weapon");
+        Offer("PICK YOUR FIRST WEAPON");
     }
 
     /// <summary>Level-up: pause and offer three modifiers.</summary>
@@ -232,7 +236,7 @@ public partial class Main : Node3D
             return;
         }
         _choosing = true;
-        var cards = offers.ConvertAll(m => (m.Weapon is { } kind ? $"{m.Name}\n({WeaponStats.Name(kind)})" : m.Name, m.Description));
+        var cards = offers.ConvertAll(m => Cards.Modifier(_state, m));
         _overlay.ShowCards($"LEVEL {_state.Level}", "Pick one: 1-3 / click / d-pad + A", cards, i =>
         {
             Modifiers.Pick(_world, _state, offers[i]);
@@ -247,8 +251,7 @@ public partial class Main : Node3D
             _overlay.Close();
             return;
         }
-        var cards = new List<(string, string)> { ("Resume", "Back to the bugs"), ("Restart", "Start this level over"), ("Kitchen", "Back to the first level") };
-        _overlay.ShowCards("PAUSED", "Esc / Start to resume", cards, i =>
+        _overlay.ShowCards("PAUSED", "Esc / Start to resume", Cards.Pause(), i =>
         {
             if (i == 1)
                 Restart(_selectedLevel ?? StartLevel);
@@ -377,7 +380,7 @@ public partial class Main : Node3D
         }
         else
         {
-            _runnerView.ShowWeapons(weapons.Exists(w => w.Kind == WeaponKind.Minigun), weapons.Exists(w => w.Kind == WeaponKind.LightningWand));
+            _runnerView.ShowWeapons(weapons);
             _runnerView.Sync(position, velocity, _world.Get<Runner>(player), elevation, health, minigunSpin, dt);
             _runnerView.SyncParachute(_world.Get<Runner>(player).Gliding, dt);
         }
@@ -415,6 +418,16 @@ public partial class Main : Node3D
                 Liquids.Color(puddle.Kind).ToGodot(), custom: new Color(seed, fade, Math.Clamp(thick, 0f, 1f), 0f));
         });
         _puddleRenderer.End();
+
+        // Bug spray: pale, slightly green mist that swells and thins out.
+        _puffRenderer.Begin();
+        _world.Query(in PuffQuery, (ref SprayPuff puff, ref Position p) =>
+        {
+            float t = puff.Age / puff.Lifetime;
+            float alpha = 0.35f * MathF.Min(1f, t * 6f) * (1f - t);
+            _puffRenderer.Add(new Vector3(p.Value.X, puff.Height, p.Value.Y), 0f, Vector3.One * puff.Radius, new Color(0.85f, 0.95f, 0.8f, alpha));
+        });
+        _puffRenderer.End();
 
         // Items bob and turn until picked up.
         foreach (var (entity, view) in _pickupViews)

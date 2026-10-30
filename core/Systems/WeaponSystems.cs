@@ -15,14 +15,16 @@ public static class WeaponStats
     {
         WeaponKind.Minigun => "Minigun",
         WeaponKind.LightningWand => "Ball-lightning wand",
-        _ => "Seed mortar",
+        WeaponKind.SeedMortar => "Seed mortar",
+        _ => "Bug spray",
     };
 
     public static string Blurb(WeaponKind kind) => kind switch
     {
         WeaponKind.Minigun => "A hose of tracer rounds at the nearest bug.",
         WeaponKind.LightningWand => "Glowing orbs drift into the swarm and chain-zap it.",
-        _ => "Lobs seeds anywhere in range, even up onto the counter. Boom.",
+        WeaponKind.SeedMortar => "Lobs seeds anywhere in range, even up onto the counter. Boom.",
+        _ => "A cone of insecticide mist up close: poisons and slows every bug in it.",
     };
 
     private static float DamageScale(in WeaponSlot w) => 1f + 0.4f * w.Damage;
@@ -54,6 +56,19 @@ public static class WeaponStats
     public static float MortarRadius(in WeaponSlot w) => 2.5f + 0.6f * w.Area;
     public static bool MortarSticky(in WeaponSlot w) => w.Special > 0;
     public const float MortarRange = 16f;
+
+    // Bug spray: a short cone of mist towards the nearest bug. Every puff poisons (damage per second)
+    // and slows the bugs inside it as it drifts out and swells.
+    public static float SprayCooldown(in WeaponSlot w) => 0.09f * RateScale(w);
+    public static int SprayPuffs(in WeaponSlot w) => 1 + w.Count;
+    public static float SpraySpread(in WeaponSlot w) => 0.3f + 0.12f * w.Count; // half-angle of the cone, radians
+    public static float SprayDps(in WeaponSlot w) => 30f * DamageScale(w);
+    public static float SprayRange(in WeaponSlot w) => 5f + 1.5f * w.Area;
+    public static float SprayPuffSize(in WeaponSlot w) => 1.1f + 0.3f * w.Area;
+    public static float SprayPush(in WeaponSlot w) => 3f * w.Pierce;
+    public static float SprayLinger(in WeaponSlot w) => w.Special > 0 ? 1.8f : 1f;
+    public const float SpraySpeed = 9f;
+    public const float SpraySlow = 0.55f;
 }
 
 /// <summary>Fires every weapon the player carries when its cooldown is up and something is in range.</summary>
@@ -128,6 +143,35 @@ public sealed class WeaponSystem(World world, GameState state) : GameSystem(worl
                     }
                     break;
                 }
+                case WeaponKind.BugSpray:
+                {
+                    float range = WeaponStats.SprayRange(w);
+                    int target = grid.Nearest(position, range, _scratch, height, WeaponStats.MaxHeightDifference);
+                    if (target < 0)
+                        return;
+                    slot.Timer = WeaponStats.SprayCooldown(w) * State.CooldownScale;
+                    float aim = (grid.Positions[target] - position).Angle();
+                    int puffs = WeaponStats.SprayPuffs(w);
+                    float spread = WeaponStats.SpraySpread(w);
+                    for (int k = 0; k < puffs; k++)
+                    {
+                        float angle = aim + ((float)State.Rng.NextDouble() * 2f - 1f) * spread;
+                        float speed = WeaponStats.SpraySpeed * (0.8f + 0.4f * (float)State.Rng.NextDouble());
+                        var puff = new SprayPuff
+                        {
+                            Dps = WeaponStats.SprayDps(w) * State.DamageScale,
+                            Lifetime = range / WeaponStats.SpraySpeed * WeaponStats.SprayLinger(w),
+                            StartRadius = 0.35f,
+                            EndRadius = WeaponStats.SprayPuffSize(w),
+                            Height = height + 0.6f,
+                            Push = WeaponStats.SprayPush(w),
+                        };
+                        var start = position + Vector2.FromAngle(angle) * 0.5f;
+                        var v = Vector2.FromAngle(angle) * speed + velocity * 0.5f;
+                        _spawns.Add(() => World.Create(new Position(start), new Velocity(v), puff));
+                    }
+                    break;
+                }
                 case WeaponKind.SeedMortar:
                 {
                     _scratch.Clear();
@@ -163,6 +207,49 @@ public sealed class WeaponSystem(World world, GameState state) : GameSystem(worl
 
         foreach (var spawn in _spawns)
             spawn();
+    }
+}
+
+/// <summary>Bug spray mist: slows down as it drifts, swells, and poisons and slows the bugs inside each puff.</summary>
+public sealed class SpraySystem(World world, GameState state) : GameSystem(world, state)
+{
+    private static readonly QueryDescription Query = new QueryDescription().WithAll<SprayPuff, Position, Velocity>();
+    private readonly List<int> _inside = new();
+
+    public override void Update(float dt)
+    {
+        var grid = State.EnemyGrid;
+        float drag = MathF.Exp(-2.5f * dt);
+        World.Query(in Query, (Entity entity, ref SprayPuff puff, ref Position position, ref Velocity velocity) =>
+        {
+            puff.Age += dt;
+            if (puff.Age >= puff.Lifetime)
+            {
+                State.Destroy(entity);
+                return;
+            }
+            velocity.Value *= drag;
+            float radius = puff.Radius;
+            // Fades out over the last third: less poison as it thins.
+            float strength = MathF.Min(1f, 3f * (1f - puff.Age / puff.Lifetime));
+
+            _inside.Clear();
+            grid.Query(position.Value, radius, _inside);
+            foreach (int i in _inside)
+            {
+                if (MathF.Abs(grid.Heights[i] + 0.5f - puff.Height) > 1.5f)
+                    continue;
+                var bug = grid.Entities[i];
+                if (!World.IsAlive(bug))
+                    continue;
+                World.Get<Health>(bug).Current -= puff.Dps * strength * dt;
+                World.Get<Velocity>(bug).Value *= WeaponStats.SpraySlow;
+                ref var enemy = ref World.Get<Enemy>(bug);
+                if (puff.Push > 0f && velocity.Value.LengthSquared() > 0.01f)
+                    enemy.Knockback += velocity.Value.Normalized() * puff.Push * dt * 6f;
+                enemy.HitFlash = MathF.Max(enemy.HitFlash, 0.03f);
+            }
+        });
     }
 }
 

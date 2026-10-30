@@ -35,8 +35,8 @@ plays them with bots (climbing routes, the parachute glide, puddles, weapons, mo
 | Jump (hold for higher) | Space | A or Y |
 | Glide (with the parachute): hold jump while falling | Space | A or Y |
 | Pause | Esc / P | Start |
-| Pick a card (weapon, modifier, pause menu) | 1 / 2 / 3, or arrows + Enter, or click | D-pad + A |
-| Add a weapon (debug) | Shift + 1 / 2 / 3 | |
+| Pick a card (weapon, modifier, pause menu) | 1-4, or arrows + Enter, or click | D-pad + A |
+| Add a weapon (debug) | Shift + 1 / 2 / 3 / 4 | |
 | Switch level (debug) | F1 / F2 / F3 | |
 | Restart after getting squashed | R | Start |
 
@@ -85,17 +85,19 @@ Each level is one class in `src/Levels/` built from the helpers in `Level.cs`.
   and variable height. **Land on a bug to stomp it** and bounce off: chain stomps across a swarm.
 - **Bugs climb**: they run straight at you and scale any wall in the way, so camping on the
   counter just means watching ants pour over the edge. They drop off edges to follow you down.
-- **Weapons, chosen not grinded**: at the start of a run you pick **two of the three** (all fire
+- **Weapons, chosen not grinded**: at the start of a run you pick **two of the four** (all fire
   automatically):
   - **Minigun**: a hose of tracer rounds at the nearest bug on your level; spinning barrels.
   - **Ball-lightning wand**: slow glowing orbs that drift into the swarm and chain-zap several
     bugs at once, lighting up everything around them.
   - **Seed mortar**: lobs seeds at random bugs in range, even onto the counter from the floor,
     that burst on landing.
+  - **Bug spray**: a short cone of insecticide mist towards the nearest bug; every puff poisons and
+    slows the bugs inside it as it drifts out and swells.
 - **Modifiers**: every level-up pauses the game and offers **three modifiers to pick one from**, for
   the weapons you carry (Hollow points, Extra barrel, Tungsten rounds, Twin orbs, Forked
   lightning, Static field, Cluster seeds, Big bang, Sticky jam that leaves slowing jam where seeds
-  burst, ...) or yourself (Thick skin, Running shoes, Gem magnet, Heavy boots). Each has a pick
+  burst, Wide nozzle, Knockdown formula, Lingering cloud, ...) or yourself (Thick skin, Running shoes, Gem magnet, Heavy boots). Each has a pick
   limit; the HUD lists what each weapon has. The catalogue is `Modifiers.All` in
   `src/Systems/ProgressionSystems.cs`, the numbers are in `WeaponStats`.
 - **Bugs walk**: legs step in a tripod gait and antennae feel around (animated in a shader, so
@@ -128,17 +130,20 @@ blender --background --python tools/blender/generate_models.py -- --only ant mug
 
 On Windows use the full path, e.g.
 `"C:\Program Files\Blender Foundation\Blender 5.0\blender.exe" -b -P tools\blender\generate_models.py`.
-`--preview` also renders PNG previews into `assets/previews/` (not used by the game), `--draft`
+`--preview` also renders PNG previews into `assets/previews/` (not used by the game), `--icons`
+renders the transparent menu-card icons into `assets/icons/`, `--draft`
 uses half-size textures for quick iterations. Each model is one `build_*` function at the bottom
 of the script: shapes plus a material recipe.
 
 | File | Used for |
 |---|---|
-| `runner.glb` | the player, a chibi explorer with a fedora (separate `LegL/LegR/ArmL/ArmR` parts so the run cycle still animates) |
+| `runner.glb` | the hero: realistic proportions, brown leather bomber jacket over a white tee, jeans and boots (separate `LegL/LegR/ArmL/ArmR` parts so the run cycle still animates) |
 | `ant.glb`, `beetle.glb` | enemies (an `anim` vertex colour tags legs and antennae for the walk shader) |
-| `minigun.glb`, `wand.glb` | weapons in the runner's hands (the minigun's `Barrels` part spins) |
+| `minigun.glb`, `wand.glb`, `spray_can.glb` | weapons in the runner's hands (the minigun's `Barrels` part spins) |
+| `mortar.glb` | the seed mortar (menu icon) |
+| `icons/*.png` | menu-card icons, rendered with `--icons` (transparent 256 px) |
 | `strawberry.glb`, `orange.glb`, `banana.glb`, `cherries.glb` | fruit |
-| `gem.glb` | XP gems |
+| `gem.glb` | XP crystals (amber sugar crystals) |
 | `counter.glb`, `stool.glb`, `cutting_board.glb`, `toy_block.glb` | the kitchen counter (butcher-block top, navy cabinets) and the ways up (blocks are tinted in game) |
 | `back_counter.glb`, `fridge.glb` | cabinets and fridge along the back wall |
 | `mug_white.glb`, `mug_red.glb`, `apple.glb`, `book_blue.glb`, `book_gold.glb`, `cereal_box.glb`, `pencil.glb` | props on the counter |

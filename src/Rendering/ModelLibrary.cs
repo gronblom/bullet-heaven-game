@@ -131,6 +131,13 @@ public static class ModelLibrary
             OwnMaterials(child, materials, tint);
     }
 
+    /// <summary>A menu-card icon from assets/icons/ (rendered by the Blender generator with --icons), or null.</summary>
+    public static Texture2D LoadIcon(string name)
+    {
+        string path = "res://assets/icons/" + name + ".png";
+        return ResourceLoader.Exists(path) ? GD.Load<Texture2D>(path) : null;
+    }
+
     /// <summary>Loads an optional texture from assets/textures/, or null.</summary>
     public static Texture2D LoadTexture(string name)
     {

@@ -62,7 +62,7 @@ sealed class Sim : IDisposable
         _systems = new GameSystem[]
         {
             new PlayerInputSystem(World, State), new RunnerPhysicsSystem(World, State), new CarPhysicsSystem(World, State),
-            new EnemySteeringSystem(World, State), new BossSystem(World, State), new LiquidSystem(World, State),
+            new EnemySteeringSystem(World, State), new BossSystem(World, State), new LiquidSystem(World, State), new SpraySystem(World, State),
             new MovementSystem(World, State), new CollisionSystem(World, State), new VerticalPhysicsSystem(World, State),
             new ItemSystem(World, State), new EnemyGridSystem(World, State), new PlayerContactSystem(World, State),
             new WeaponSystem(World, State), new BulletSystem(World, State), new LightningOrbSystem(World, State),
@@ -201,7 +201,7 @@ sealed class Sim : IDisposable
 
     public static void Weapons(CheckFn check)
     {
-        foreach (var kind in new[] { WeaponKind.Minigun, WeaponKind.LightningWand, WeaponKind.SeedMortar })
+        foreach (var kind in Cards.Loadout)
         {
             using var sim = new Sim(0, new Vector2(0f, 30f));
             Arsenal.Grant(sim.World, kind);
